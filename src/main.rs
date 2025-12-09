@@ -1,0 +1,333 @@
+use std::fs::File;
+use std::io::Seek;
+use std::path::PathBuf;
+use std::str::FromStr;
+
+use anyhow::Result;
+use binrw::BinReaderExt;
+use eframe::{egui, NativeOptions};
+use egui::{RichText, ViewportCommand};
+
+mod save;
+use save::*;
+
+fn main() -> eframe::Result<()> {
+    let options = NativeOptions::default();
+    eframe::run_native(
+        "Silent Hill f Save Editor",
+        options,
+        Box::new(|_cc| Ok(Box::<AppState>::default())),
+    )
+}
+
+const BINARY_DATA_CUTOFF: usize = 10;
+
+#[derive(Default)]
+struct AppState {
+    save_path: Option<PathBuf>,
+    save: Option<SaveGame>,
+    error_message: Option<String>,
+}
+
+impl AppState {
+    fn error_modal(&mut self, ctx: &egui::Context) {
+        let Some(ref error_message) = self.error_message else {
+            return;
+        };
+
+        let response = egui::Modal::new(egui::Id::new("Error Modal")).show(ctx, |ui| {
+            ui.label(RichText::new("Error").strong());
+            ui.separator();
+            ui.vertical_centered(|ui| {
+                ui.label(error_message);
+                ui.button("OK").clicked()
+            }).inner
+        });
+
+        if response.should_close() || response.inner {
+            self.error_message = None;
+        }
+    }
+
+    fn load_save(&mut self, save_path: PathBuf) -> Result<()> {
+        let mut file = File::open(&save_path)?;
+        let save: SaveGame = file.read_le()?;
+        self.save_path = Some(save_path);
+        self.save = Some(save);
+        Ok(())
+    }
+
+    fn open_save(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Silent Hill f save", &["sav"])
+            .pick_file()
+        {
+            if let Err(err) = self.load_save(path) {
+                self.error_message = Some(format!("Failed to load save: {err}"));
+            }
+        }
+    }
+
+    fn typed_input<T: ToString + FromStr>(ui: &mut egui::Ui, label: &str, value: &mut T) {
+        ui.horizontal(|ui| {
+            ui.label(format!("{label}: "));
+            let mut string = value.to_string();
+            if ui.text_edit_singleline(&mut string).changed() && let Ok(parsed) = string.parse::<T>() {
+                *value = parsed;
+            }
+        });
+    }
+
+    fn text_input(ui: &mut egui::Ui, label: &str, value: &mut FString) {
+        ui.horizontal(|ui| {
+            ui.label(format!("{label}: "));
+            ui.text_edit_singleline(value.as_mut());
+        });
+    }
+
+    fn show_header(&mut self, ui: &mut egui::Ui) {
+        let Some(save) = &mut self.save else {
+            return;
+        };
+
+        Self::typed_input(ui, "Save Game Version", &mut save.header.save_game_version);
+        egui::CollapsingHeader::new("Package Version")
+            .default_open(true)
+            .show(ui, |ui| {
+                Self::typed_input(ui, "UE4", &mut save.header.package_version.0);
+                Self::typed_input(ui, "UE5", &mut save.header.package_version.1);
+            });
+        egui::CollapsingHeader::new("Engine Version")
+            .default_open(true)
+            .show(ui, |ui| {
+                Self::typed_input(ui, "Major", &mut save.header.engine_version.major);
+                Self::typed_input(ui, "Minor", &mut save.header.engine_version.minor);
+                Self::typed_input(ui, "Patch", &mut save.header.engine_version.patch);
+                Self::typed_input(ui, "Build", &mut save.header.engine_version.build);
+                Self::text_input(ui, "Build ID", &mut save.header.engine_version.build_id);
+            });
+    }
+
+    fn show_custom_format(&mut self, ui: &mut egui::Ui) {
+        let Some(save) = &mut self.save else {
+            return;
+        };
+
+        Self::typed_input(ui, "Version", &mut save.custom_format_data.version);
+
+        let num_entries = save.custom_format_data.entries.len();
+        egui::CollapsingHeader::new(format!("Entries ({num_entries})"))
+            .show(ui, |ui| {
+                for (i, entry) in save.custom_format_data.entries.iter_mut().enumerate() {
+                    egui::CollapsingHeader::new(i.to_string())
+                        .show(ui, |ui| {
+                            Self::typed_input(ui, "GUID", &mut entry.guid);
+                            Self::typed_input(ui, "Value", &mut entry.value);
+                        });
+                }
+            });
+    }
+
+    fn show_type(ui: &mut egui::Ui, property_type: &mut PropertyType) {
+        Self::text_input(ui, "Name", &mut property_type.name);
+
+        let num_tags = property_type.tags.len();
+        egui::CollapsingHeader::new(format!("Tags ({num_tags})"))
+            .show(ui, |ui| {
+                for (i, tag) in property_type.tags.iter_mut().enumerate() {
+                    egui::CollapsingHeader::new(i.to_string())
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            Self::typed_input(ui, "Kind", &mut tag.kind);
+                            Self::text_input(ui, "Value", &mut tag.value);
+                        });
+                }
+            });
+    }
+
+    fn show_property(ui: &mut egui::Ui, property: &mut Property) {
+        Self::text_input(ui, "Name", &mut property.name);
+
+        let Some(property) = &mut property.body else {
+            return;
+        };
+
+        egui::CollapsingHeader::new(format!("Type: {}", property.property_type.describe()))
+            .show(ui, |ui| {
+                Self::show_type(ui, &mut property.property_type);
+            });
+        // FIXME: how to initialize the inner type if the user changes the type from one that has no
+        //  inner type to one that does?
+        if property.property_type.has_inner_type() && let Some(inner_type) = &mut property.inner_type {
+            egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
+                .show(ui, |ui| {
+                    Self::show_type(ui, inner_type);
+                });
+        }
+        Self::typed_input(ui, "Flags", &mut property.flags);
+
+        match &mut property.value {
+            PropertyValue::StrProperty(s) | PropertyValue::NameProperty(s) | PropertyValue::EnumProperty(s) => {
+                Self::text_input(ui, "Value", s);
+            }
+            PropertyValue::BoolProperty(b) => {
+                ui.checkbox(b, "Value");
+            }
+            PropertyValue::ByteProperty(b) => {
+                Self::typed_input(ui, "Value", b);
+            }
+            PropertyValue::IntProperty(i) => {
+                Self::typed_input(ui, "Value", i);
+            }
+            PropertyValue::FloatProperty(f) => {
+                Self::typed_input(ui, "Value", f);
+            }
+            PropertyValue::DoubleProperty(d) => {
+                Self::typed_input(ui, "Value", d);
+            }
+            PropertyValue::TextProperty { flags, data } => {
+                egui::CollapsingHeader::new("Value")
+                    .show(ui, |ui| {
+                        let mut int_flags = flags.bits();
+                        Self::typed_input(ui, "Flags", &mut int_flags);
+                        *flags = TextFlags::from_bits(int_flags).unwrap();
+                        // TODO: implement selector for TextData type
+                        match data {
+                            TextData::None { values } => {
+                                let num_values = values.len();
+                                egui::CollapsingHeader::new(format!("Values ({num_values})"))
+                                    .show(ui, |ui| {
+                                        for (i, value) in values.iter_mut().enumerate() {
+                                            Self::text_input(ui, &i.to_string(), value);
+                                        }
+                                    });
+                            }
+                            TextData::Base { namespace, key, source_string } => {
+                                Self::text_input(ui, "Namespace", namespace);
+                                Self::text_input(ui, "Key", key);
+                                Self::text_input(ui, "Source String", source_string);
+                            }
+                            TextData::AsDateTime { ticks, date_style, time_style, time_zone, culture_name } => {
+                                Self::typed_input(ui, "Ticks", ticks);
+                                Self::typed_input(ui, "Date Style", date_style);
+                                Self::typed_input(ui, "Time Style", time_style);
+                                Self::text_input(ui, "Time Zone", time_zone);
+                                Self::text_input(ui, "Culture Name", culture_name);
+                            }
+                            TextData::StringTableEntry { table, key } => {
+                                Self::text_input(ui, "Table", table);
+                                Self::text_input(ui, "Key", key);
+                            }
+                        }
+                    });
+            }
+            PropertyValue::StructProperty(props) => {
+                Self::show_properties(ui, props);
+            }
+            PropertyValue::ArrayProperty { values } => {
+
+            }
+            PropertyValue::UnknownProperty(data) => {
+                let mut desc = String::from("Value: ");
+                for (i, b) in data.iter().enumerate() {
+                    if i >= BINARY_DATA_CUTOFF {
+                        desc.push_str("...");
+                        break;
+                    }
+                    desc.push_str(&format!("{:02X} ", b));
+                }
+                ui.label(desc);
+            }
+        }
+    }
+
+    fn show_properties(ui: &mut egui::Ui, properties: &mut Vec<Property>) {
+        let num_properties = properties.len();
+        egui::CollapsingHeader::new(format!("Properties ({num_properties})"))
+            .show(ui, |ui| {
+                for (i, property) in properties.iter_mut().enumerate() {
+                    egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
+                        .show(ui, |ui| {
+                            Self::show_property(ui, property);
+                        });
+                }
+            });
+    }
+
+    fn show_save_game(&mut self, ui: &mut egui::Ui) {
+        let Some(save) = &mut self.save else {
+            return;
+        };
+
+        Self::text_input(ui, "Type", &mut save.save_data.type_name);
+        Self::typed_input(ui, "Flags", &mut save.save_data.flags);
+        Self::show_properties(ui, &mut save.save_data.properties);
+    }
+}
+
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Menu bar
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open .sav...").clicked() {
+                        ui.close();
+                        self.open_save();
+                    }
+                    if ui.button("Exit").clicked() {
+                        ui.close();
+                        ctx.send_viewport_cmd(ViewportCommand::Close);
+                    }
+                });
+            });
+        });
+
+        // Optional left tree panel when a file is loaded
+        if self.save.is_some() {
+            egui::CentralPanel::default()
+                .show(ctx, |ui| {
+                    // Placeholder tree view using collapsing headers
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            egui::CollapsingHeader::new("Header")
+                                .show(ui, |ui| self.show_header(ui));
+
+                            egui::CollapsingHeader::new("Custom Format")
+                                .show(ui, |ui| self.show_custom_format(ui));
+
+                            egui::CollapsingHeader::new("Save Game")
+                                .show(ui, |ui| self.show_save_game(ui));
+                        });
+                });
+        } else {
+            // Main content
+            egui::CentralPanel::default().show(ctx, |ui| {
+                match &self.save_path {
+                    None => {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.heading("Silent Hill f Save Editor");
+                            ui.label("Open a .sav file to begin.");
+                            ui.add_space(10.0);
+                            if ui.button("Open .sav...").clicked() {
+                                self.open_save();
+                            }
+                        });
+                    }
+                    Some(path) => {
+                        // Right side: file info / placeholder content panel
+                        ui.vertical_centered(|ui| {
+                            ui.heading("File Loaded");
+                            ui.monospace(path.display().to_string());
+                            ui.label("Tree contents to be implemented.");
+                        });
+                    }
+                }
+            });
+        }
+
+        self.error_modal(ctx);
+    }
+}
