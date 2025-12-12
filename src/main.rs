@@ -272,8 +272,18 @@ impl AppState {
 
                 egui::CollapsingHeader::new(format!("{label} ({num_values})"))
                     .show(ui, |ui| {
+                        let mut delete_index = None;
                         for (i, value) in values.iter_mut().enumerate() {
-                            Self::show_property_value(ui, &i.to_string(), value, None);
+                            ui.horizontal(|ui| {
+                                if ui.button("🗑").clicked() {
+                                    delete_index = Some(i);
+                                }
+                                Self::show_property_value(ui, &i.to_string(), value, None);
+                            });
+                        }
+
+                        if let Some(index) = delete_index {
+                            values.remove(index);
                         }
                     });
             }
@@ -311,11 +321,21 @@ impl AppState {
         let num_properties = properties.len();
         egui::CollapsingHeader::new(format!("{label} ({num_properties})"))
             .show(ui, |ui| {
+                let mut delete_index = None;
                 for (i, property) in properties.iter_mut().enumerate() {
-                    egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
-                        .show(ui, |ui| {
-                            Self::show_property(ui, property);
-                        });
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!property.is_none(), egui::Button::new("🗑")).clicked() {
+                            delete_index = Some(i);
+                        }
+                        egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
+                            .show(ui, |ui| {
+                                Self::show_property(ui, property);
+                            });
+                    });
+                }
+
+                if let Some(index) = delete_index {
+                    properties.remove(index);
                 }
             });
     }
@@ -343,7 +363,7 @@ impl eframe::App for AppState {
                         self.open_save();
                     }
                     let can_save = self.save.is_some();
-                    if ui.add_enabled(can_save, egui::Button::new("Save As..."))
+                    if ui.add_enabled(can_save, egui::Button::new("Save as..."))
                         .clicked()
                     {
                         ui.close();
