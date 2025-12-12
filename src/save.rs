@@ -1,13 +1,24 @@
 use std::borrow::Cow;
 use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
-use std::io::{Read, Seek};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use binrw::{binrw, binwrite, BinRead, BinResult, BinWrite, Endian, NullString};
-use binrw::helpers::until_eof;
+use binrw::{binrw, binwrite, BinRead, BinReaderExt, BinResult, BinWrite, Endian, NullString};
 use bitflags::bitflags;
+
+const CUSTOM_STRUCT_CLASSES: [&'static str; 4] = [
+    "/Script/GameNoce.NocePlayerInventoryComponent",
+    // there are blueprint records inside this object that I don't know how to parse
+    // "/Script/GameNoce.NoceInteractableBase",
+    "/Script/GameNoce.NocePlayerTriggerBase",
+    // FIXME: this type only has 4 bytes of "extra" data instead of 8. need a better way to handle this.
+    // "/Script/GameNoce.NoceEnvironmentSubsystem",
+    "/Script/GameNoce.NocePlayerCharacter",
+    "/Script/GameNoce.NocePlayerState",
+];
+//const CUSTOM_STRUCT_NAMESPACE: &str = "/Script/GameNoce.";
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -227,6 +238,43 @@ impl TextData {
     }
 }
 
+#[binrw::parser(reader, endian)]
+fn read_properties_with_footer<const N: u64>() -> BinResult<Vec<Property>> {
+    let mut props = Vec::new();
+
+    let start = reader.stream_position()?;
+    reader.seek(SeekFrom::End(0))?;
+    let eof = reader.stream_position()?;
+    reader.seek(SeekFrom::Start(start))?;
+
+    let end = eof - N;
+
+    while reader.stream_position()? < end {
+        match Property::read_options(reader, endian, ()) {
+            Ok(prop) => props.push(prop),
+            Err(e) if e.is_eof() && N == 0 => break,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(props)
+}
+
+#[binrw]
+#[derive(Debug, Clone)]
+pub struct CustomStruct {
+    pub flags: u8,
+    #[br(parse_with = read_properties_with_footer::<8, _>)]
+    pub properties: Vec<Property>,
+    pub extra: u64,
+}
+
+impl CustomStruct {
+    pub fn size(&self) -> usize {
+        1 + self.properties.iter().map(Property::size).sum::<usize>()
+    }
+}
+
 #[binwrite]
 #[derive(Debug, Clone)]
 pub enum PropertyValue {
@@ -246,6 +294,7 @@ pub enum PropertyValue {
     NameProperty(FString),
     ObjectProperty(FString),
     StructProperty(Vec<Property>),
+    CustomStructProperty(CustomStruct),
     ArrayProperty {
         #[bw(calc = values.len() as u32)]
         count: u32,
@@ -264,6 +313,7 @@ impl PropertyValue {
             Self::DoubleProperty(_) => 8,
             Self::TextProperty { data, .. } => 4 + data.size(),
             Self::StructProperty(props) => props.iter().map(Property::size).sum::<usize>(),
+            Self::CustomStructProperty(s) => s.size(),
             Self::ArrayProperty { values } => 4 + values.iter().map(PropertyValue::size).sum::<usize>(),
             Self::UnknownProperty(v) => v.len(),
         }
@@ -287,7 +337,21 @@ impl BinRead for PropertyValue {
                     u8::read_options(reader, endian, ())? != 0
                 })
             }
-            "ByteProperty" => Self::ByteProperty(u8::read_options(reader, endian, ())?),
+            "ByteProperty" => {
+                if args.data_size == 1 {
+                    Self::ByteProperty(u8::read_options(reader, endian, ())?)
+                } else if !args.property_type.tags.is_empty() && let Ok(s) = FString::read_options(reader, endian, ()) {
+                    // it looks like sometimes enum values are recorded as ByteProperty? so if we have tags
+                    // and data_size != 1, see if we can parse as an enum value
+                    Self::EnumProperty(s)
+                } else {
+                    // reset stream position in case enum value parse failed
+                    reader.seek(SeekFrom::Start(start))?;
+                    let mut buf = vec![0u8; args.data_size as usize];
+                    reader.read_exact(&mut buf)?;
+                    Self::UnknownProperty(buf)
+                }
+            }
             "IntProperty" => Self::IntProperty(i32::read_options(reader, endian, ())?),
             "FloatProperty" => Self::FloatProperty(f32::read_options(reader, endian, ())?),
             "DoubleProperty" => Self::DoubleProperty(f64::read_options(reader, endian, ())?),
@@ -309,8 +373,14 @@ impl BinRead for PropertyValue {
                 } else {
                     let mut props = Vec::new();
 
+                    let mut is_custom_struct = false;
                     while reader.stream_position()? < end {
-                        let prop = Property::read_options(reader, endian, ())?;
+                        let mut prop = Property::read_options(reader, endian, ())?;
+                        if prop.is_custom_struct_class() {
+                            is_custom_struct = true;
+                        } else if is_custom_struct && prop.is_custom_struct_data() {
+                            prop.parse_custom_struct_data()?;
+                        }
                         let is_none = prop.is_none();
                         props.push(prop);
                         if is_none {
@@ -334,8 +404,6 @@ impl BinRead for PropertyValue {
                 } else {
                     let mut values = Vec::with_capacity(count);
                     for _ in 0..count {
-                        // FIXME: size calculation here is a problem for structs because we don't know where each
-                        //  element should end
                         let current = reader.stream_position()?;
                         let remaining_size = (end - current) as u32;
                         values.push(PropertyValue::read_options(reader, endian, PropertyValueArgs::new(&element_type, args.flags, remaining_size))?);
@@ -409,8 +477,29 @@ pub struct PropertyType {
 }
 
 impl PropertyType {
-    pub fn has_inner_type(&self) -> bool {
-        self.name == "EnumProperty" || (self.name == "ArrayProperty" && matches!(self.tags.first(), Some(tag) if tag.value == "EnumProperty"))
+    pub fn num_inner_types(&self) -> usize {
+        match self.name.as_str() {
+            "EnumProperty" => 1,
+            "MapProperty" => {
+                match self.tags.first() {
+                    Some(tag) if tag.value == "EnumProperty" => 2,
+                    _ => 1,
+                }
+            }
+            "ArrayProperty" => {
+                match self.tags.first() {
+                    Some(tag) if tag.value == "EnumProperty" => 1,
+                    Some(tag) if tag.value == "MapProperty" => {
+                        match self.tags.get(1) {
+                            Some(tag) if tag.value == "EnumProperty" => 2,
+                            _ => 1,
+                        }
+                    }
+                    _ => 0,
+                }
+            }
+            _ => 0,
+        }
     }
 
     fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag]) {
@@ -460,8 +549,8 @@ impl PropertyType {
 #[derive(Debug, Clone)]
 pub struct PropertyBody {
     pub property_type: PropertyType,
-    #[br(if(property_type.has_inner_type()))]
-    pub inner_type: Option<PropertyType>,
+    #[br(count = property_type.num_inner_types())]
+    pub inner_type: Vec<PropertyType>,
     #[bw(calc = value.size() as u32)]
     data_size: u32,
     pub flags: u8,
@@ -471,7 +560,24 @@ pub struct PropertyBody {
 
 impl PropertyBody {
     pub fn size(&self) -> usize {
-        self.property_type.size() + self.inner_type.as_ref().map(PropertyType::size).unwrap_or(0) + 4 + 1 + self.value.size()
+        self.property_type.size() + self.inner_type.iter().map(PropertyType::size).sum::<usize>() + 4 + 1 + self.value.size()
+    }
+
+    pub fn parse_custom_struct(&mut self) -> BinResult<()> {
+        let custom_struct: CustomStruct = {
+            let PropertyValue::ArrayProperty { values } = &self.value else {
+                return Ok(());
+            };
+            let Some(PropertyValue::UnknownProperty(data)) = values.first() else {
+                return Ok(());
+            };
+
+            let mut reader = Cursor::new(data);
+            reader.read_le()?
+        };
+
+        self.value = PropertyValue::CustomStructProperty(custom_struct);
+        Ok(())
     }
 }
 
@@ -488,28 +594,36 @@ impl Property {
         self.body.is_none()
     }
 
-    pub fn size(&self) -> usize {
-        self.name.byte_size() + self.body.as_ref().map(PropertyBody::size).unwrap_or(0)
-    }
-}
-
-// TODO: remove this once we're confident the save is being parsed correctly
-#[binrw::parser(reader, endian)]
-fn read_properties_until_eof() -> BinResult<Vec<Property>> {
-    let mut props = Vec::new();
-
-    loop {
-        match Property::read_options(reader, endian, ()) {
-            Ok(prop) => props.push(prop),
-            Err(e) if e.is_eof() => {
-                println!("{:06X}:\n{}", reader.stream_position()?, e);
-                break
+    pub fn is_custom_struct_class(&self) -> bool {
+        match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
+            ("Class", Some(PropertyValue::ObjectProperty(s))) => {
+                // s.as_str().starts_with(CUSTOM_STRUCT_NAMESPACE)
+                CUSTOM_STRUCT_CLASSES.contains(&s.as_str())
             }
-            Err(e) => return Err(e),
+            _ => false,
         }
     }
 
-    Ok(props)
+    pub fn is_custom_struct_data(&self) -> bool {
+        match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
+            ("Data", Some(PropertyValue::ArrayProperty { values })) => {
+                values.len() == 1 && matches!(values.first(), Some(PropertyValue::UnknownProperty(_)))
+            }
+            _ => false,
+        }
+    }
+
+    pub fn parse_custom_struct_data(&mut self) -> BinResult<()> {
+        if self.is_custom_struct_data() {
+            self.body.as_mut().unwrap().parse_custom_struct()
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.name.byte_size() + self.body.as_ref().map(PropertyBody::size).unwrap_or(0)
+    }
 }
 
 #[binrw]
@@ -517,7 +631,7 @@ fn read_properties_until_eof() -> BinResult<Vec<Property>> {
 pub struct SaveGameData {
     pub type_name: FString,
     pub flags: u8,
-    #[br(parse_with = read_properties_until_eof)]
+    #[br(parse_with = read_properties_with_footer::<4, _>)]
     pub properties: Vec<Property>,
     pub extra: u32,
 }

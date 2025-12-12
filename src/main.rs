@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Seek;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -149,7 +148,7 @@ impl AppState {
         let mut desc = format!("{label}: ");
         for (i, b) in data.iter().enumerate() {
             if i >= BINARY_DATA_CUTOFF {
-                desc.push_str("...");
+                desc.push_str(&format!("... ({})", data.len()));
                 break;
             }
             desc.push_str(&format!("{:02X} ", b));
@@ -216,6 +215,15 @@ impl AppState {
             PropertyValue::StructProperty(props) => {
                 Self::show_properties(ui, label, props);
             }
+            PropertyValue::CustomStructProperty(custom_struct) => {
+                egui::CollapsingHeader::new(label)
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        Self::typed_input(ui, "Flags", &mut custom_struct.flags);
+                        Self::show_properties(ui, "Properties", &mut custom_struct.properties);
+                        Self::typed_input(ui, "Extra", &mut custom_struct.extra);
+                    });
+            }
             PropertyValue::ArrayProperty { values } => {
                 let num_values = values.len();
                 if num_values == 1 && let Some(PropertyValue::UnknownProperty(data)) = values.first() {
@@ -249,7 +257,7 @@ impl AppState {
             });
         // FIXME: how to initialize the inner type if the user changes the type from one that has no
         //  inner type to one that does?
-        if property.property_type.has_inner_type() && let Some(inner_type) = &mut property.inner_type {
+        for inner_type in &mut property.inner_type {
             egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
                 .show(ui, |ui| {
                     Self::show_type(ui, inner_type);
@@ -281,6 +289,7 @@ impl AppState {
         Self::text_input(ui, "Type", &mut save.save_data.type_name);
         Self::typed_input(ui, "Flags", &mut save.save_data.flags);
         Self::show_properties(ui, "Properties", &mut save.save_data.properties);
+        Self::typed_input(ui, "Extra", &mut save.save_data.extra);
     }
 }
 
