@@ -56,7 +56,7 @@ impl FromStr for Guid {
 pub struct FString {
     #[bw(calc = string.len() as u32 + 1)]
     size: u32,
-    #[br(map = |s: NullString| s.to_string(), assert(string.len() as u32 == size - 1), dbg)]
+    #[br(map = |s: NullString| s.to_string(), assert(string.len() as u32 == size - 1))]
     #[bw(map = |s| NullString::from(s.as_str()))]
     string: String,
 }
@@ -244,6 +244,7 @@ pub enum PropertyValue {
     },
     EnumProperty(FString),
     NameProperty(FString),
+    ObjectProperty(FString),
     StructProperty(Vec<Property>),
     ArrayProperty {
         #[bw(calc = values.len() as u32)]
@@ -256,7 +257,7 @@ pub enum PropertyValue {
 impl PropertyValue {
     pub fn size(&self) -> usize {
         match self {
-            Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) => s.byte_size(),
+            Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) | Self::ObjectProperty(s) => s.byte_size(),
             Self::BoolProperty(_) => 0,
             Self::ByteProperty(_) => 1,
             Self::IntProperty(_) | Self::FloatProperty(_) => 4,
@@ -298,6 +299,7 @@ impl BinRead for PropertyValue {
             }
             "EnumProperty" => Self::EnumProperty(FString::read_options(reader, endian, ())?),
             "NameProperty" => Self::NameProperty(FString::read_options(reader, endian, ())?),
+            "ObjectProperty" => Self::ObjectProperty(FString::read_options(reader, endian, ())?),
             "StructProperty" => {
                 // non-zero flags (or possibly just 08) seems to indicate types that don't have explicit field descriptions
                 if args.flags != 0 {
@@ -308,7 +310,13 @@ impl BinRead for PropertyValue {
                     let mut props = Vec::new();
 
                     while reader.stream_position()? < end {
-                        props.push(Property::read_options(reader, endian, ())?);
+                        let prop = Property::read_options(reader, endian, ())?;
+                        let is_none = prop.is_none();
+                        props.push(prop);
+                        if is_none {
+                            // empty property signals the end of this struct
+                            break;
+                        }
                     }
 
                     Self::StructProperty(props)
@@ -343,7 +351,7 @@ impl BinRead for PropertyValue {
         };
 
         let current = reader.stream_position()?;
-        if current != end {
+        if current > end {
             // TODO: make this an error, not a panic
             panic!("property value size mismatch: expected {} bytes, got {}", args.data_size, current);
         }
@@ -476,11 +484,16 @@ pub struct Property {
 }
 
 impl Property {
+    pub const fn is_none(&self) -> bool {
+        self.body.is_none()
+    }
+
     pub fn size(&self) -> usize {
         self.name.byte_size() + self.body.as_ref().map(PropertyBody::size).unwrap_or(0)
     }
 }
 
+// TODO: remove this once we're confident the save is being parsed correctly
 #[binrw::parser(reader, endian)]
 fn read_properties_until_eof() -> BinResult<Vec<Property>> {
     let mut props = Vec::new();
@@ -506,6 +519,7 @@ pub struct SaveGameData {
     pub flags: u8,
     #[br(parse_with = read_properties_until_eof)]
     pub properties: Vec<Property>,
+    pub extra: u32,
 }
 
 #[binrw]

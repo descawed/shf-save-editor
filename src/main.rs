@@ -145,48 +145,40 @@ impl AppState {
             });
     }
 
-    fn show_property(ui: &mut egui::Ui, property: &mut Property) {
-        Self::text_input(ui, "Name", &mut property.name);
-
-        let Some(property) = &mut property.body else {
-            return;
-        };
-
-        egui::CollapsingHeader::new(format!("Type: {}", property.property_type.describe()))
-            .show(ui, |ui| {
-                Self::show_type(ui, &mut property.property_type);
-            });
-        // FIXME: how to initialize the inner type if the user changes the type from one that has no
-        //  inner type to one that does?
-        if property.property_type.has_inner_type() && let Some(inner_type) = &mut property.inner_type {
-            egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
-                .show(ui, |ui| {
-                    Self::show_type(ui, inner_type);
-                });
+    fn show_binary_data(ui: &mut egui::Ui, label: &str, data: &[u8]) {
+        let mut desc = format!("{label}: ");
+        for (i, b) in data.iter().enumerate() {
+            if i >= BINARY_DATA_CUTOFF {
+                desc.push_str("...");
+                break;
+            }
+            desc.push_str(&format!("{:02X} ", b));
         }
-        Self::typed_input(ui, "Flags", &mut property.flags);
+        ui.label(desc);
+    }
 
-        match &mut property.value {
-            PropertyValue::StrProperty(s) | PropertyValue::NameProperty(s) | PropertyValue::EnumProperty(s) => {
-                Self::text_input(ui, "Value", s);
+    fn show_property_value(ui: &mut egui::Ui, label: &str, property_value: &mut PropertyValue) {
+        match property_value {
+            PropertyValue::StrProperty(s) | PropertyValue::NameProperty(s) | PropertyValue::EnumProperty(s) | PropertyValue::ObjectProperty(s) => {
+                Self::text_input(ui, label, s);
             }
             PropertyValue::BoolProperty(b) => {
-                ui.checkbox(b, "Value");
+                ui.checkbox(b, label);
             }
             PropertyValue::ByteProperty(b) => {
-                Self::typed_input(ui, "Value", b);
+                Self::typed_input(ui, label, b);
             }
             PropertyValue::IntProperty(i) => {
-                Self::typed_input(ui, "Value", i);
+                Self::typed_input(ui, label, i);
             }
             PropertyValue::FloatProperty(f) => {
-                Self::typed_input(ui, "Value", f);
+                Self::typed_input(ui, label, f);
             }
             PropertyValue::DoubleProperty(d) => {
-                Self::typed_input(ui, "Value", d);
+                Self::typed_input(ui, label, d);
             }
             PropertyValue::TextProperty { flags, data } => {
-                egui::CollapsingHeader::new("Value")
+                egui::CollapsingHeader::new(label)
                     .show(ui, |ui| {
                         let mut int_flags = flags.bits();
                         Self::typed_input(ui, "Flags", &mut int_flags);
@@ -222,28 +214,55 @@ impl AppState {
                     });
             }
             PropertyValue::StructProperty(props) => {
-                Self::show_properties(ui, props);
+                Self::show_properties(ui, label, props);
             }
             PropertyValue::ArrayProperty { values } => {
+                let num_values = values.len();
+                if num_values == 1 && let Some(PropertyValue::UnknownProperty(data)) = values.first() {
+                    Self::show_binary_data(ui, label, data);
+                    return;
+                }
 
+                egui::CollapsingHeader::new(format!("{label} ({num_values})"))
+                    .show(ui, |ui| {
+                        for (i, value) in values.iter_mut().enumerate() {
+                            Self::show_property_value(ui, &i.to_string(), value);
+                        }
+                    });
             }
             PropertyValue::UnknownProperty(data) => {
-                let mut desc = String::from("Value: ");
-                for (i, b) in data.iter().enumerate() {
-                    if i >= BINARY_DATA_CUTOFF {
-                        desc.push_str("...");
-                        break;
-                    }
-                    desc.push_str(&format!("{:02X} ", b));
-                }
-                ui.label(desc);
+                Self::show_binary_data(ui, label, data);
             }
         }
     }
 
-    fn show_properties(ui: &mut egui::Ui, properties: &mut Vec<Property>) {
+    fn show_property(ui: &mut egui::Ui, property: &mut Property) {
+        Self::text_input(ui, "Name", &mut property.name);
+
+        let Some(property) = &mut property.body else {
+            return;
+        };
+
+        egui::CollapsingHeader::new(format!("Type: {}", property.property_type.describe()))
+            .show(ui, |ui| {
+                Self::show_type(ui, &mut property.property_type);
+            });
+        // FIXME: how to initialize the inner type if the user changes the type from one that has no
+        //  inner type to one that does?
+        if property.property_type.has_inner_type() && let Some(inner_type) = &mut property.inner_type {
+            egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
+                .show(ui, |ui| {
+                    Self::show_type(ui, inner_type);
+                });
+        }
+        Self::typed_input(ui, "Flags", &mut property.flags);
+
+        Self::show_property_value(ui, "Value", &mut property.value);
+    }
+
+    fn show_properties(ui: &mut egui::Ui, label: &str, properties: &mut Vec<Property>) {
         let num_properties = properties.len();
-        egui::CollapsingHeader::new(format!("Properties ({num_properties})"))
+        egui::CollapsingHeader::new(format!("{label} ({num_properties})"))
             .show(ui, |ui| {
                 for (i, property) in properties.iter_mut().enumerate() {
                     egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
@@ -261,7 +280,7 @@ impl AppState {
 
         Self::text_input(ui, "Type", &mut save.save_data.type_name);
         Self::typed_input(ui, "Flags", &mut save.save_data.flags);
-        Self::show_properties(ui, &mut save.save_data.properties);
+        Self::show_properties(ui, "Properties", &mut save.save_data.properties);
     }
 }
 
