@@ -151,18 +151,29 @@ impl AppState {
                 desc.push_str(&format!("... ({})", data.len()));
                 break;
             }
-            desc.push_str(&format!("{:02X} ", b));
+            desc.push_str(&format!("{b:02X} "));
         }
         ui.label(desc);
     }
 
-    fn show_property_value(ui: &mut egui::Ui, label: &str, property_value: &mut PropertyValue) {
+    fn show_property_value(ui: &mut egui::Ui, label: &str, property_value: &mut PropertyValue, flags: Option<&mut u8>) {
         match property_value {
             PropertyValue::StrProperty(s) | PropertyValue::NameProperty(s) | PropertyValue::EnumProperty(s) | PropertyValue::ObjectProperty(s) => {
                 Self::text_input(ui, label, s);
             }
             PropertyValue::BoolProperty(b) => {
-                ui.checkbox(b, label);
+                if let Some(value) = b {
+                    ui.checkbox(value, label);
+                } else {
+                    let flags = flags.expect("flags should not be None if the BoolProperty value is also None");
+                    let mut value = *flags & 0x10 != 0;
+                    ui.checkbox(&mut value, label);
+                    if value {
+                        *flags |= 0x10;
+                    } else {
+                        *flags &= !0x10;
+                    }
+                }
             }
             PropertyValue::ByteProperty(b) => {
                 Self::typed_input(ui, label, b);
@@ -234,7 +245,7 @@ impl AppState {
                 egui::CollapsingHeader::new(format!("{label} ({num_values})"))
                     .show(ui, |ui| {
                         for (i, value) in values.iter_mut().enumerate() {
-                            Self::show_property_value(ui, &i.to_string(), value);
+                            Self::show_property_value(ui, &i.to_string(), value, None);
                         }
                     });
             }
@@ -265,7 +276,7 @@ impl AppState {
         }
         Self::typed_input(ui, "Flags", &mut property.flags);
 
-        Self::show_property_value(ui, "Value", &mut property.value);
+        Self::show_property_value(ui, "Value", &mut property.value, Some(&mut property.flags));
     }
 
     fn show_properties(ui: &mut egui::Ui, label: &str, properties: &mut Vec<Property>) {

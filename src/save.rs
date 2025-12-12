@@ -279,8 +279,7 @@ impl CustomStruct {
 #[derive(Debug, Clone)]
 pub enum PropertyValue {
     StrProperty(FString),
-    // FIXME: bool value appears to be stored in the flag byte and have no data component
-    BoolProperty(#[bw(map = |b| *b as u8)] bool),
+    BoolProperty(#[bw(map = |b| b.map(|b| b as u8))] Option<bool>),
     ByteProperty(u8),
     IntProperty(i32),
     FloatProperty(f32),
@@ -307,8 +306,8 @@ impl PropertyValue {
     pub fn size(&self) -> usize {
         match self {
             Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) | Self::ObjectProperty(s) => s.byte_size(),
-            Self::BoolProperty(_) => 0,
-            Self::ByteProperty(_) => 1,
+            Self::BoolProperty(None) => 0,
+            Self::ByteProperty(_) | Self::BoolProperty(Some(_)) => 1,
             Self::IntProperty(_) | Self::FloatProperty(_) => 4,
             Self::DoubleProperty(_) => 8,
             Self::TextProperty { data, .. } => 4 + data.size(),
@@ -332,9 +331,9 @@ impl BinRead for PropertyValue {
             "StrProperty" => Self::StrProperty(FString::read_options(reader, endian, ())?),
             "BoolProperty" => {
                 Self::BoolProperty(if args.data_size == 0 {
-                    args.flags & 0xf0 != 0
+                    None
                 } else {
-                    u8::read_options(reader, endian, ())? != 0
+                    Some(u8::read_options(reader, endian, ())? != 0)
                 })
             }
             "ByteProperty" => {
