@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["descawed <github@descawed.com>"]
 edition = "2024"
 description = "A low-level save editor for Silent Hill f"
+readme = "README.md"
 repository = "https://github.com/descawed/shf-save-editor"
 
 [dependencies]
