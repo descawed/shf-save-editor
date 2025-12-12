@@ -18,6 +18,7 @@ const CUSTOM_STRUCT_CLASSES: [&'static str; 4] = [
     "/Script/GameNoce.NocePlayerCharacter",
     "/Script/GameNoce.NocePlayerState",
 ];
+const GAMEPLAY_TAG_CONTAINER_TYPE: &str = "StructProperty</Script/GameplayTags.GameplayTagContainer>";
 //const CUSTOM_STRUCT_NAMESPACE: &str = "/Script/GameNoce.";
 
 #[binrw]
@@ -389,9 +390,19 @@ impl BinRead for PropertyValue {
             "StructProperty" => {
                 // non-zero flags (or possibly just 08) seems to indicate types that don't have explicit field descriptions
                 if args.flags != 0 {
-                    let mut buf = vec![0u8; args.data_size as usize];
-                    reader.read_exact(&mut buf)?;
-                    Self::UnknownProperty(buf)
+                    if args.property_type.describe() == GAMEPLAY_TAG_CONTAINER_TYPE {
+                        // data is effectively an ArrayProperty[NameProperty]
+                        let count = u32::read_options(reader, endian, ())? as usize;
+                        let mut values = Vec::with_capacity(count);
+                        for _ in 0..count {
+                            values.push(Self::NameProperty(FString::read_options(reader, endian, ())?));
+                        }
+                        Self::ArrayProperty { values }
+                    } else {
+                        let mut buf = vec![0u8; args.data_size as usize];
+                        reader.read_exact(&mut buf)?;
+                        Self::UnknownProperty(buf)
+                    }
                 } else {
                     let mut props = Vec::new();
 
