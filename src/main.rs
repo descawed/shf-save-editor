@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use binrw::BinReaderExt;
+use binrw::BinWriterExt;
 use eframe::{egui, NativeOptions};
 use egui::{RichText, ViewportCommand};
 
@@ -63,6 +64,33 @@ impl AppState {
         {
             if let Err(err) = self.load_save(path) {
                 self.error_message = Some(format!("Failed to load save: {err}"));
+            }
+        }
+    }
+
+    fn save_as(&mut self) {
+        let Some(ref save) = self.save else { return; };
+
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Silent Hill f save", &["sav"]);
+
+        if let Some(path) = &self.save_path {
+            if let Some(parent) = path.parent() {
+                dialog = dialog.set_directory(parent);
+            }
+        }
+
+        if let Some(path) = dialog.save_file() {
+            let result: Result<()> = (|| {
+                let mut file = File::create(&path)?;
+                file.write_le(save)?;
+                Ok(())
+            })();
+
+            if let Err(err) = result {
+                self.error_message = Some(format!("Failed to save: {err}"));
+            } else {
+                self.save_path = Some(path);
             }
         }
     }
@@ -313,6 +341,13 @@ impl eframe::App for AppState {
                     if ui.button("Open .sav...").clicked() {
                         ui.close();
                         self.open_save();
+                    }
+                    let can_save = self.save.is_some();
+                    if ui.add_enabled(can_save, egui::Button::new("Save As..."))
+                        .clicked()
+                    {
+                        ui.close();
+                        self.save_as();
                     }
                     if ui.button("Exit").clicked() {
                         ui.close();

@@ -263,6 +263,11 @@ fn read_properties_with_footer<const N: u64>() -> BinResult<Vec<Property>> {
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct CustomStruct {
+    // this field is ignored on read because it's read as part of the ArrayProperty before we detect
+    // whether the array contents are a custom struct or not
+    #[br(ignore)]
+    #[bw(calc = self.size() as u32 - 4)]
+    data_size: u32,
     pub flags: u8,
     #[br(parse_with = read_properties_with_footer::<8, _>)]
     pub properties: Vec<Property>,
@@ -271,7 +276,7 @@ pub struct CustomStruct {
 
 impl CustomStruct {
     pub fn size(&self) -> usize {
-        1 + self.properties.iter().map(Property::size).sum::<usize>()
+        4 + 1 + self.properties.iter().map(Property::size).sum::<usize>() + 8
     }
 }
 
@@ -295,7 +300,7 @@ pub enum PropertyValue {
     StructProperty(Vec<Property>),
     CustomStructProperty(CustomStruct),
     ArrayProperty {
-        #[bw(calc = values.len() as u32)]
+        #[bw(calc = self.array_len().unwrap() as u32)]
         count: u32,
         values: Vec<PropertyValue>,
     },
@@ -316,6 +321,24 @@ impl PropertyValue {
             Self::ArrayProperty { values } => 4 + values.iter().map(PropertyValue::size).sum::<usize>(),
             Self::UnknownProperty(v) => v.len(),
         }
+    }
+
+    pub fn array_len(&self) -> Option<usize> {
+        Some(match self {
+            // custom structs are encoded as byte arrays
+            Self::CustomStructProperty(s) => s.size(),
+            Self::ArrayProperty { values } => {
+                let num_values = values.len();
+                // as an optimization, we read byte arrays as a single UnknownProperty instead of a
+                // series of ByteProperties
+                if num_values == 1 && let Some(Self::UnknownProperty(buf)) = values.first() {
+                    buf.len()
+                } else {
+                    num_values
+                }
+            }
+            _ => return None,
+        })
     }
 }
 
@@ -529,7 +552,8 @@ impl PropertyType {
     }
 
     pub fn size(&self) -> usize {
-        self.name.byte_size() + self.tags.iter().map(TypeTag::size).sum::<usize>()
+        // +4 for the tag list terminator
+        self.name.byte_size() + self.tags.iter().map(TypeTag::size).sum::<usize>() + 4
     }
 
     pub fn element_type(&self) -> Cow<'_, Self> {
