@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::fs::File;
 use std::path::PathBuf;
 use std::str::FromStr;
