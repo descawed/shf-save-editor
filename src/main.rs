@@ -289,6 +289,31 @@ impl AppState {
                         }
                     });
             }
+            PropertyValue::MapProperty { removed_count, values } => {
+                egui::CollapsingHeader::new(label)
+                    .show(ui, |ui| {
+                        Self::typed_input(ui, "Removed", removed_count);
+
+                        let mut delete_index = None;
+                        for (i, value) in values.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.button("🗑").clicked() {
+                                    delete_index = Some(i);
+                                }
+                                egui::CollapsingHeader::new(i.to_string())
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        Self::show_property_value(ui, "Key", &mut value.0, None);
+                                        Self::show_property_value(ui, "Value", &mut value.1, None);
+                                    });
+                            });
+                        }
+
+                        if let Some(index) = delete_index {
+                            values.remove(index);
+                        }
+                    });
+            }
             PropertyValue::UnknownProperty(data) => {
                 Self::show_binary_data(ui, label, data);
             }

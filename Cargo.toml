@@ -1,6 +1,6 @@
 [package]
 name = "shf-save-editor"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["descawed <github@descawed.com>"]
 edition = "2024"
 description = "A low-level save editor for Silent Hill f"

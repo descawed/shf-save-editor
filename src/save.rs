@@ -173,13 +173,14 @@ pub struct SaveGameHeader {
 #[derive(Debug, Clone)]
 pub struct PropertyValueArgs<'a> {
     property_type: &'a PropertyType,
+    inner_types: &'a [PropertyType],
     flags: u8,
     data_size: u32,
 }
 
 impl<'a> PropertyValueArgs<'a> {
-    pub const fn new(property_type: &'a PropertyType, flags: u8, data_size: u32) -> Self {
-        Self { property_type, flags, data_size }
+    pub const fn new(property_type: &'a PropertyType, inner_types: &'a [PropertyType], flags: u8, data_size: u32) -> Self {
+        Self { property_type, inner_types, flags, data_size }
     }
 }
 
@@ -305,6 +306,12 @@ pub enum PropertyValue {
         count: u32,
         values: Vec<PropertyValue>,
     },
+    MapProperty {
+        removed_count: u32,
+        #[bw(calc = self.array_len().unwrap() as u32)]
+        count: u32,
+        values: Vec<(PropertyValue, PropertyValue)>,
+    },
     UnknownProperty(Vec<u8>),
 }
 
@@ -320,6 +327,7 @@ impl PropertyValue {
             Self::StructProperty(props) => props.iter().map(Property::size).sum::<usize>(),
             Self::CustomStructProperty(s) => s.size(),
             Self::ArrayProperty { values } => 4 + values.iter().map(PropertyValue::size).sum::<usize>(),
+            Self::MapProperty { values, .. } => 8 + values.iter().map(|(k, v)| k.size() + v.size()).sum::<usize>(),
             Self::UnknownProperty(v) => v.len(),
         }
     }
@@ -328,6 +336,7 @@ impl PropertyValue {
         Some(match self {
             // custom structs are encoded as byte arrays
             Self::CustomStructProperty(s) => s.size(),
+            Self::MapProperty { values, .. } => values.len(),
             Self::ArrayProperty { values } => {
                 let num_values = values.len();
                 // as an optimization, we read byte arrays as a single UnknownProperty instead of a
@@ -439,10 +448,35 @@ impl BinRead for PropertyValue {
                     for _ in 0..count {
                         let current = reader.stream_position()?;
                         let remaining_size = (end - current) as u32;
-                        values.push(PropertyValue::read_options(reader, endian, PropertyValueArgs::new(&element_type, args.flags, remaining_size))?);
+                        values.push(PropertyValue::read_options(reader, endian, PropertyValueArgs::new(&element_type, &[], args.flags, remaining_size))?);
                     }
                     Self::ArrayProperty { values }
                 }
+            }
+            "MapProperty" => {
+                // FIXME: I'm pretty sure our type parsing logic is broken for maps with multiple nested types,
+                //  like maps where both the key and value are enums, or where the value is also a map
+                let key_type = args.property_type.element_type().into_owned();
+                let value_type = args.inner_types.last().expect("MapProperty should have a value type").clone();
+                let flags = args.flags;
+
+                let removed_count = u32::read_options(reader, endian, ())?;
+                let count = u32::read_options(reader, endian, ())? as usize;
+                let mut values = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let current = reader.stream_position()?;
+                    let remaining_size = (end - current) as u32;
+                    let args = PropertyValueArgs::new(&key_type, &[], flags, remaining_size);
+                    let key = PropertyValue::read_options(reader, endian, args)?;
+
+                    let current = reader.stream_position()?;
+                    let remaining_size = (end - current) as u32;
+                    let args = PropertyValueArgs::new(&value_type, &[], flags, remaining_size);
+                    let value = PropertyValue::read_options(reader, endian, args)?;
+
+                    values.push((key, value));
+                }
+                Self::MapProperty { removed_count, values }
             }
             _ => {
                 let mut buf = vec![0u8; args.data_size as usize];
@@ -569,7 +603,7 @@ impl PropertyType {
 
     pub fn element_type(&self) -> Cow<'_, Self> {
         match self.name.as_str() {
-            "ArrayProperty" if !self.tags.is_empty() => {
+            "ArrayProperty" | "MapProperty" if !self.tags.is_empty() => {
                 let name = self.tags[0].value.clone();
                 let tags = self.tags[1..].to_vec();
                 Cow::Owned(Self { name, tags })
@@ -588,7 +622,7 @@ pub struct PropertyBody {
     #[bw(calc = value.size() as u32)]
     data_size: u32,
     pub flags: u8,
-    #[br(args_raw(PropertyValueArgs::new(&property_type, flags, data_size)))]
+    #[br(args_raw(PropertyValueArgs::new(&property_type, &inner_type, flags, data_size)))]
     pub value: PropertyValue,
 }
 
