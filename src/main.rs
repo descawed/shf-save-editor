@@ -172,6 +172,15 @@ impl AppState {
                         });
                 }
             });
+
+        // FIXME: how to initialize the inner type if the user changes the type from one that has no
+        //  inner type to one that does?
+        for inner_type in &mut property_type.inner_types {
+            egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
+                .show(ui, |ui| {
+                    Self::show_type(ui, inner_type);
+                });
+        }
     }
 
     fn show_binary_data(ui: &mut egui::Ui, label: &str, data: &[u8]) {
@@ -331,14 +340,6 @@ impl AppState {
             .show(ui, |ui| {
                 Self::show_type(ui, &mut property.property_type);
             });
-        // FIXME: how to initialize the inner type if the user changes the type from one that has no
-        //  inner type to one that does?
-        for inner_type in &mut property.property_type.inner_types {
-            egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
-                .show(ui, |ui| {
-                    Self::show_type(ui, inner_type);
-                });
-        }
         Self::typed_input(ui, "Flags", &mut property.flags);
 
         Self::show_property_value(ui, "Value", &mut property.value, Some(&mut property.flags));

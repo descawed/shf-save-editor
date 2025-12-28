@@ -569,30 +569,49 @@ pub struct PropertyType {
 }
 
 impl PropertyType {
-    fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag]) {
+    fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag], inner_types: &[Self]) {
         desc.push_str(name);
-
-        if (name == "StructProperty" || name == "EnumProperty") && !tags.is_empty() {
-            desc.push_str("<");
-            if let Some(namespace) = tags.get(1) {
-                desc.push_str(namespace.value.as_str());
-                desc.push_str(".");
-            }
-            desc.push_str(tags.first().unwrap().value.as_str());
-            desc.push_str(">");
+        
+        if tags.is_empty() {
+            return;
         }
+        
+        match name {
+            "StructProperty" | "EnumProperty" => {
+                desc.push_str("<");
+                if let Some(namespace) = tags.get(1) {
+                    desc.push_str(namespace.value.as_str());
+                    desc.push_str(".");
+                }
+                desc.push_str(tags.first().unwrap().value.as_str());
+                desc.push_str(">");
+            }
+            "ArrayProperty" => {
+                desc.push_str("[");
+                let inner_type = tags.first().unwrap().value.as_str();
+                Self::describe_by_name(desc, inner_type, &tags[1..], inner_types);
+                desc.push_str("]");
+            }
+            "MapProperty" if !inner_types.is_empty() => {
+                desc.push_str("<");
 
-        if name == "ArrayProperty" && !tags.is_empty() {
-            desc.push_str("[");
-            let inner_type = tags.first().unwrap().value.as_str();
-            Self::describe_by_name(desc, inner_type, &tags[1..]);
-            desc.push_str("]");
+                let key_type = tags.first().unwrap().value.as_str();
+                Self::describe_by_name(desc, key_type, &tags[1..], inner_types);
+                
+                desc.push_str(", ");
+                
+                let value_type = inner_types.last().unwrap();
+                Self::describe_by_name(desc, value_type.name.as_str(), &value_type.tags, &value_type.inner_types);
+                
+                desc.push_str(">");
+            }
+            _ => (),
         }
     }
 
     pub fn describe(&self) -> String {
         let mut desc = String::new();
-        Self::describe_by_name(&mut desc, self.name.as_str(), &self.tags);
+        Self::describe_by_name(&mut desc, self.name.as_str(), &self.tags, &self.inner_types);
         desc
     }
 
