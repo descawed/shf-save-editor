@@ -333,7 +333,7 @@ impl AppState {
             });
         // FIXME: how to initialize the inner type if the user changes the type from one that has no
         //  inner type to one that does?
-        for inner_type in &mut property.inner_type {
+        for inner_type in &mut property.property_type.inner_types {
             egui::CollapsingHeader::new(format!("Inner Type: {}", inner_type.name))
                 .show(ui, |ui| {
                     Self::show_type(ui, inner_type);

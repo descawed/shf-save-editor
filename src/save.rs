@@ -173,14 +173,13 @@ pub struct SaveGameHeader {
 #[derive(Debug, Clone)]
 pub struct PropertyValueArgs<'a> {
     property_type: &'a PropertyType,
-    inner_types: &'a [PropertyType],
     flags: u8,
     data_size: u32,
 }
 
 impl<'a> PropertyValueArgs<'a> {
-    pub const fn new(property_type: &'a PropertyType, inner_types: &'a [PropertyType], flags: u8, data_size: u32) -> Self {
-        Self { property_type, inner_types, flags, data_size }
+    pub const fn new(property_type: &'a PropertyType, flags: u8, data_size: u32) -> Self {
+        Self { property_type, flags, data_size }
     }
 }
 
@@ -448,16 +447,15 @@ impl BinRead for PropertyValue {
                     for _ in 0..count {
                         let current = reader.stream_position()?;
                         let remaining_size = (end - current) as u32;
-                        values.push(PropertyValue::read_options(reader, endian, PropertyValueArgs::new(&element_type, &[], args.flags, remaining_size))?);
+                        values.push(PropertyValue::read_options(reader, endian, PropertyValueArgs::new(&element_type, args.flags, remaining_size))?);
                     }
                     Self::ArrayProperty { values }
                 }
             }
             "MapProperty" => {
-                // FIXME: I'm pretty sure our type parsing logic is broken for maps with multiple nested types,
-                //  like maps where both the key and value are enums, or where the value is also a map
                 let key_type = args.property_type.element_type().into_owned();
-                let value_type = args.inner_types.last().expect("MapProperty should have a value type").clone();
+                // TODO: make this an error, not a panic
+                let value_type = args.property_type.inner_types.last().expect("MapProperty should have a value type").clone();
                 let flags = args.flags;
 
                 let removed_count = u32::read_options(reader, endian, ())?;
@@ -466,12 +464,12 @@ impl BinRead for PropertyValue {
                 for _ in 0..count {
                     let current = reader.stream_position()?;
                     let remaining_size = (end - current) as u32;
-                    let args = PropertyValueArgs::new(&key_type, &[], flags, remaining_size);
+                    let args = PropertyValueArgs::new(&key_type, flags, remaining_size);
                     let key = PropertyValue::read_options(reader, endian, args)?;
 
                     let current = reader.stream_position()?;
                     let remaining_size = (end - current) as u32;
-                    let args = PropertyValueArgs::new(&value_type, &[], flags, remaining_size);
+                    let args = PropertyValueArgs::new(&value_type, flags, remaining_size);
                     let value = PropertyValue::read_options(reader, endian, args)?;
 
                     values.push((key, value));
@@ -534,6 +532,31 @@ fn write_tags(tags: &Vec<TypeTag>) -> BinResult<()> {
     0u32.write_options(writer, endian, ())
 }
 
+fn num_inner_types(name: &str, tags: &[TypeTag]) -> usize {
+    match name {
+        "EnumProperty" => 1,
+        "MapProperty" => {
+            match tags.first() {
+                Some(tag) if tag.value == "EnumProperty" => 2,
+                _ => 1,
+            }
+        }
+        "ArrayProperty" => {
+            match tags.first() {
+                Some(tag) if tag.value == "EnumProperty" => 1,
+                Some(tag) if tag.value == "MapProperty" => {
+                    match tags.get(1) {
+                        Some(tag) if tag.value == "EnumProperty" => 2,
+                        _ => 1,
+                    }
+                }
+                _ => 0,
+            }
+        }
+        _ => 0,
+    }
+}
+
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct PropertyType {
@@ -541,34 +564,11 @@ pub struct PropertyType {
     #[br(parse_with = read_tags)]
     #[bw(write_with = write_tags)]
     pub tags: Vec<TypeTag>,
+    #[br(count = num_inner_types(name.as_str(), &tags))]
+    pub inner_types: Vec<Self>,
 }
 
 impl PropertyType {
-    pub fn num_inner_types(&self) -> usize {
-        match self.name.as_str() {
-            "EnumProperty" => 1,
-            "MapProperty" => {
-                match self.tags.first() {
-                    Some(tag) if tag.value == "EnumProperty" => 2,
-                    _ => 1,
-                }
-            }
-            "ArrayProperty" => {
-                match self.tags.first() {
-                    Some(tag) if tag.value == "EnumProperty" => 1,
-                    Some(tag) if tag.value == "MapProperty" => {
-                        match self.tags.get(1) {
-                            Some(tag) if tag.value == "EnumProperty" => 2,
-                            _ => 1,
-                        }
-                    }
-                    _ => 0,
-                }
-            }
-            _ => 0,
-        }
-    }
-
     fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag]) {
         desc.push_str(name);
 
@@ -598,7 +598,7 @@ impl PropertyType {
 
     pub fn size(&self) -> usize {
         // +4 for the tag list terminator
-        self.name.byte_size() + self.tags.iter().map(TypeTag::size).sum::<usize>() + 4
+        self.name.byte_size() + self.tags.iter().map(TypeTag::size).sum::<usize>() + 4 + self.inner_types.iter().map(PropertyType::size).sum::<usize>()
     }
 
     pub fn element_type(&self) -> Cow<'_, Self> {
@@ -606,7 +606,12 @@ impl PropertyType {
             "ArrayProperty" | "MapProperty" if !self.tags.is_empty() => {
                 let name = self.tags[0].value.clone();
                 let tags = self.tags[1..].to_vec();
-                Cow::Owned(Self { name, tags })
+                let inner_types = if name == "EnumProperty" && let Some(inner_type) = self.inner_types.first() {
+                    vec![inner_type.clone()]
+                } else {
+                    Vec::new()
+                };
+                Cow::Owned(Self { name, tags, inner_types })
             }
             _ => Cow::Borrowed(self),
         }
@@ -617,18 +622,16 @@ impl PropertyType {
 #[derive(Debug, Clone)]
 pub struct PropertyBody {
     pub property_type: PropertyType,
-    #[br(count = property_type.num_inner_types())]
-    pub inner_type: Vec<PropertyType>,
     #[bw(calc = value.size() as u32)]
     data_size: u32,
     pub flags: u8,
-    #[br(args_raw(PropertyValueArgs::new(&property_type, &inner_type, flags, data_size)))]
+    #[br(args_raw(PropertyValueArgs::new(&property_type, flags, data_size)))]
     pub value: PropertyValue,
 }
 
 impl PropertyBody {
     pub fn size(&self) -> usize {
-        self.property_type.size() + self.inner_type.iter().map(PropertyType::size).sum::<usize>() + 4 + 1 + self.value.size()
+        self.property_type.size() + 4 + 1 + self.value.size()
     }
 
     pub fn parse_custom_struct(&mut self) -> BinResult<()> {
