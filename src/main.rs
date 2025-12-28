@@ -271,7 +271,7 @@ impl AppState {
                     .show(ui, |ui| {
                         Self::typed_input(ui, "Flags", &mut custom_struct.flags);
                         Self::show_properties(ui, "Properties", &mut custom_struct.properties);
-                        Self::typed_input(ui, "Extra", &mut custom_struct.extra);
+                        Self::show_binary_data(ui, "Extra", &custom_struct.extra);
                     });
             }
             PropertyValue::ArrayProperty { values } => {
@@ -299,7 +299,8 @@ impl AppState {
                     });
             }
             PropertyValue::MapProperty { removed_count, values } => {
-                egui::CollapsingHeader::new(label)
+                let num_values = values.len();
+                egui::CollapsingHeader::new(format!("{label} ({num_values})"))
                     .show(ui, |ui| {
                         Self::typed_input(ui, "Removed", removed_count);
 

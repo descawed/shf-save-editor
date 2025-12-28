@@ -8,18 +8,37 @@ use anyhow::anyhow;
 use binrw::{binrw, binwrite, BinRead, BinReaderExt, BinResult, BinWrite, Endian, NullString};
 use bitflags::bitflags;
 
-const CUSTOM_STRUCT_CLASSES: [&'static str; 4] = [
-    "/Script/GameNoce.NocePlayerInventoryComponent",
+const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 26] = [
+    ("/Script/GameNoce.NocePlayerInventoryComponent", 8),
     // there are blueprint records inside this object that I don't know how to parse
     // "/Script/GameNoce.NoceInteractableBase",
-    "/Script/GameNoce.NocePlayerTriggerBase",
-    // FIXME: this type only has 4 bytes of "extra" data instead of 8. need a better way to handle this.
-    // "/Script/GameNoce.NoceEnvironmentSubsystem",
-    "/Script/GameNoce.NocePlayerCharacter",
-    "/Script/GameNoce.NocePlayerState",
+    ("/Script/GameNoce.NocePlayerTriggerBase", 8),
+    ("/Script/GameNoce.NocePlayerCharacter", 8),
+    ("/Script/GameNoce.NocePlayerState", 8),
+    ("/Script/GameNoce.NoceBodyPartGroupComponent", 8),
+    ("/Script/GameNoce.NoceEnemyCharacter", 8),
+    ("/Script/Engine.ActorComponent", 8),
+    ("/Script/GameNoce.NoceEnvironmentSubsystem", 4),
+    ("/Script/GameNoce.NoceWorldManagerSubsystem", 4),
+    ("/Script/GameNoce.MucusSubsystem", 4),
+    ("/Script/GameNoce.NoceAchievementSubsystem", 4),
+    ("/Script/GameNoce.NoceActivitySubsystem", 4),
+    ("/Script/GameNoce.NoceItemSubsystem", 4),
+    ("/Script/GameNoce.NoceOmamoriDrawingSubsystem", 4),
+    ("/Script/GameNoce.NocePickupsHelperSubsystem", 4),
+    ("/Script/GameNoce.NoceTutorialSubsystem", 4),
+    ("/Script/GameNoce.NoceAISystem", 4),
+    ("/Script/GameNoce.NoceDialogSubsystem", 4),
+    ("/Script/GameNoce.NoceGameClockSubsystem", 4),
+    ("/Script/GameNoce.NoceBinkSubsystem", 4),
+    ("/Script/GameNoce.NoceHitPerformDataSubsystem", 4),
+    ("/Script/GameNoce.NocePlayerLookAtSubsystem", 4),
+    ("/Script/GameNoce.NoceTentacleSubsystem", 4),
+    ("/Script/GameNoce.NoceUIMissionSubsystem", 4),
+    ("/Script/GameNoce.NoceBattlePositionSubsystem", 4),
+    ("/Script/GameNoce.NocePickupsSubsystem", 4),
 ];
 const GAMEPLAY_TAG_CONTAINER_TYPE: &str = "StructProperty</Script/GameplayTags.GameplayTagContainer>";
-//const CUSTOM_STRUCT_NAMESPACE: &str = "/Script/GameNoce.";
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -240,7 +259,7 @@ impl TextData {
 }
 
 #[binrw::parser(reader, endian)]
-fn read_properties_with_footer<const N: u64>() -> BinResult<Vec<Property>> {
+fn read_properties_with_footer(footer_size: u64) -> BinResult<Vec<Property>> {
     let mut props = Vec::new();
 
     let start = reader.stream_position()?;
@@ -248,12 +267,12 @@ fn read_properties_with_footer<const N: u64>() -> BinResult<Vec<Property>> {
     let eof = reader.stream_position()?;
     reader.seek(SeekFrom::Start(start))?;
 
-    let end = eof - N;
+    let end = eof - footer_size;
 
     while reader.stream_position()? < end {
         match Property::read_options(reader, endian, ()) {
             Ok(prop) => props.push(prop),
-            Err(e) if e.is_eof() && N == 0 => break,
+            Err(e) if e.is_eof() && footer_size == 0 => break,
             Err(e) => return Err(e),
         }
     }
@@ -263,6 +282,7 @@ fn read_properties_with_footer<const N: u64>() -> BinResult<Vec<Property>> {
 
 #[binrw]
 #[derive(Debug, Clone)]
+#[br(import(extra_bytes: usize))]
 pub struct CustomStruct {
     // this field is ignored on read because it's read as part of the ArrayProperty before we detect
     // whether the array contents are a custom struct or not
@@ -270,14 +290,15 @@ pub struct CustomStruct {
     #[bw(calc = self.size() as u32 - 4)]
     data_size: u32,
     pub flags: u8,
-    #[br(parse_with = read_properties_with_footer::<8, _>)]
+    #[br(parse_with = |r, e, _: ()| read_properties_with_footer(r, e, (extra_bytes as u64,)))]
     pub properties: Vec<Property>,
-    pub extra: u64,
+    #[br(count = extra_bytes)]
+    pub extra: Vec<u8>,
 }
 
 impl CustomStruct {
     pub fn size(&self) -> usize {
-        4 + 1 + self.properties.iter().map(Property::size).sum::<usize>() + 8
+        4 + 1 + self.properties.iter().map(Property::size).sum::<usize>() + self.extra.len()
     }
 }
 
@@ -414,13 +435,13 @@ impl BinRead for PropertyValue {
                 } else {
                     let mut props = Vec::new();
 
-                    let mut is_custom_struct = false;
+                    let mut custom_struct_footer_size = None;
                     while reader.stream_position()? < end {
                         let mut prop = Property::read_options(reader, endian, ())?;
-                        if prop.is_custom_struct_class() {
-                            is_custom_struct = true;
-                        } else if is_custom_struct && prop.is_custom_struct_data() {
-                            prop.parse_custom_struct_data()?;
+                        if custom_struct_footer_size.is_none() {
+                            custom_struct_footer_size = prop.custom_struct_footer_size();
+                        } else if let Some(footer_size) = custom_struct_footer_size && prop.is_custom_struct_data() {
+                            prop.parse_custom_struct_data(footer_size)?;
                         }
                         let is_none = prop.is_none();
                         props.push(prop);
@@ -571,11 +592,11 @@ pub struct PropertyType {
 impl PropertyType {
     fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag], inner_types: &[Self]) {
         desc.push_str(name);
-        
+
         if tags.is_empty() {
             return;
         }
-        
+
         match name {
             "StructProperty" | "EnumProperty" => {
                 desc.push_str("<");
@@ -597,12 +618,12 @@ impl PropertyType {
 
                 let key_type = tags.first().unwrap().value.as_str();
                 Self::describe_by_name(desc, key_type, &tags[1..], inner_types);
-                
+
                 desc.push_str(", ");
-                
+
                 let value_type = inner_types.last().unwrap();
                 Self::describe_by_name(desc, value_type.name.as_str(), &value_type.tags, &value_type.inner_types);
-                
+
                 desc.push_str(">");
             }
             _ => (),
@@ -653,7 +674,7 @@ impl PropertyBody {
         self.property_type.size() + 4 + 1 + self.value.size()
     }
 
-    pub fn parse_custom_struct(&mut self) -> BinResult<()> {
+    pub fn parse_custom_struct(&mut self, footer_size: usize) -> BinResult<()> {
         let custom_struct: CustomStruct = {
             let PropertyValue::ArrayProperty { values } = &self.value else {
                 return Ok(());
@@ -663,7 +684,7 @@ impl PropertyBody {
             };
 
             let mut reader = Cursor::new(data);
-            reader.read_le()?
+            reader.read_le_args((footer_size,))?
         };
 
         self.value = PropertyValue::CustomStructProperty(custom_struct);
@@ -684,13 +705,12 @@ impl Property {
         self.body.is_none()
     }
 
-    pub fn is_custom_struct_class(&self) -> bool {
+    pub fn custom_struct_footer_size(&self) -> Option<usize> {
         match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
             ("Class", Some(PropertyValue::ObjectProperty(s))) => {
-                // s.as_str().starts_with(CUSTOM_STRUCT_NAMESPACE)
-                CUSTOM_STRUCT_CLASSES.contains(&s.as_str())
+                CUSTOM_STRUCT_CLASSES.iter().find_map(|(class, footer_size)| (s == class).then_some(*footer_size))
             }
-            _ => false,
+            _ => None,
         }
     }
 
@@ -703,9 +723,9 @@ impl Property {
         }
     }
 
-    pub fn parse_custom_struct_data(&mut self) -> BinResult<()> {
+    pub fn parse_custom_struct_data(&mut self, footer_size: usize) -> BinResult<()> {
         if self.is_custom_struct_data() {
-            self.body.as_mut().unwrap().parse_custom_struct()
+            self.body.as_mut().unwrap().parse_custom_struct(footer_size)
         } else {
             Ok(())
         }
@@ -721,7 +741,7 @@ impl Property {
 pub struct SaveGameData {
     pub type_name: FString,
     pub flags: u8,
-    #[br(parse_with = read_properties_with_footer::<4, _>)]
+    #[br(parse_with = |r, e, _: ()| read_properties_with_footer(r, e, (4,)))]
     pub properties: Vec<Property>,
     pub extra: u32,
 }
