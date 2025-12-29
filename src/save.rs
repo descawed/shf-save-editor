@@ -44,6 +44,74 @@ const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 27] = [
 const GAMEPLAY_TAG_CONTAINER_TYPE: &str = "StructProperty</Script/GameplayTags.GameplayTagContainer>";
 const CORE_UOBJECT_TYPE_PREFIX: &str = "StructProperty</Script/CoreUObject.";
 
+/// A save object containing other objects which can be accessed by name or numeric index
+pub trait Indexable {
+    fn get_key(&self, key: &str) -> Option<&PropertyValue>;
+    fn get_key_mut(&mut self, key: &str) -> Option<&mut PropertyValue>;
+    fn get_index(&self, index: usize) -> Option<&PropertyValue>;
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut PropertyValue>;
+}
+
+/// A type that can be used to index into a save object
+pub trait PropertyIndex {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue>;
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue>;
+}
+
+impl PropertyIndex for &str {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
+        indexable.get_key(self)
+    }
+
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
+        indexable.get_key_mut(self)
+    }
+}
+
+impl PropertyIndex for usize {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
+        indexable.get_index(*self)
+    }
+
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
+        indexable.get_index_mut(*self)
+    }
+}
+
+macro_rules! prop {
+    // first index is treated specially because we're not necessarily dealing with a PropertyValue
+    // at that point
+    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
+        let mut cur = $idx1.get_from($obj);
+        $(
+            cur = match cur {
+                Some(p) => $idx.get_from(p),
+                None => None,
+            };
+        )*
+        cur
+    }};
+}
+
+pub(crate) use prop;
+
+macro_rules! prop_mut {
+    // first index is treated specially because we're not necessarily dealing with a PropertyValue
+    // at that point
+    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
+        let mut cur = $idx1.get_from_mut($obj);
+        $(
+            cur = match cur {
+                Some(p) => $idx.get_from_mut(p),
+                None => None,
+            };
+        )*
+        cur
+    }};
+}
+
+pub(crate) use prop_mut;
+
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct Guid([u8; 16]);
@@ -383,6 +451,103 @@ impl PropertyValue {
             }
             _ => return None,
         })
+    }
+}
+
+impl Indexable for PropertyValue {
+    fn get_key(&self, key: &str) -> Option<&Self> {
+        match self {
+            Self::StructProperty(props) => props.iter().find_map(|p| if p.name == key {
+                p.body.as_ref().map(|b| &b.value)
+            } else {
+                None
+            }),
+            Self::CustomStructProperty(s) => s.properties.iter().find_map(|p| if p.name == key {
+                p.body.as_ref().map(|b| &b.value)
+            } else {
+                None
+            }),
+            Self::MapProperty { values, .. } => values.iter().find_map(|(k, v)| (k == key).then_some(v)),
+            _ => None,
+        }
+    }
+
+    fn get_key_mut(&mut self, key: &str) -> Option<&mut Self> {
+        match self {
+            Self::StructProperty(props) => props.iter_mut().find_map(|p| if p.name == key {
+                p.body.as_mut().map(|b| &mut b.value)
+            } else {
+                None
+            }),
+            Self::CustomStructProperty(s) => s.properties.iter_mut().find_map(|p| if p.name == key {
+                p.body.as_mut().map(|b| &mut b.value)
+            } else {
+                None
+            }),
+            Self::MapProperty { values, .. } => values.iter_mut().find_map(|(k, v)| (k == key).then_some(v)),
+            _ => None,
+        }
+    }
+
+    fn get_index(&self, index: usize) -> Option<&Self> {
+        match self {
+            Self::ArrayProperty { values, .. } => values.get(index),
+            Self::MapProperty { values, .. } => values.iter().find_map(|(k, v)| (*k == index).then_some(v)),
+            _ => None,
+        }
+    }
+
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut Self> {
+        match self {
+            Self::ArrayProperty { values, .. } => values.get_mut(index),
+            Self::MapProperty { values, .. } => values.iter_mut().find_map(|(k, v)| (*k == index).then_some(v)),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq<str> for PropertyValue {
+    fn eq(&self, other: &str) -> bool {
+        match self {
+            Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) | Self::ObjectProperty(s) => s == other,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<&str> for PropertyValue {
+    fn eq(&self, other: &&str) -> bool {
+        self == *other
+    }
+}
+
+impl PartialEq<String> for PropertyValue {
+    fn eq(&self, other: &String) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<i32> for PropertyValue {
+    fn eq(&self, other: &i32) -> bool {
+        match self {
+            Self::IntProperty(i) => *i == *other,
+            Self::ByteProperty(b) => *b as i32 == *other,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<usize> for PropertyValue {
+    fn eq(&self, other: &usize) -> bool {
+        match self {
+            Self::IntProperty(i) => if *i < 0 {
+                false
+            } else {
+                *i as usize == *other
+            },
+            Self::ByteProperty(b) => *b as usize == *other,
+            _ => false,
+        }
     }
 }
 
@@ -754,6 +919,24 @@ impl PropertyBody {
     }
 }
 
+impl Indexable for PropertyBody {
+    fn get_key(&self, name: &str) -> Option<&PropertyValue> {
+        self.value.get_key(name)
+    }
+
+    fn get_key_mut(&mut self, name: &str) -> Option<&mut PropertyValue> {
+        self.value.get_key_mut(name)
+    }
+
+    fn get_index(&self, index: usize) -> Option<&PropertyValue> {
+        self.value.get_index(index)
+    }
+
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut PropertyValue> {
+        self.value.get_index_mut(index)
+    }
+}
+
 #[binrw]
 #[derive(Debug)]
 pub struct Property {
@@ -802,6 +985,24 @@ impl Property {
     }
 }
 
+impl Indexable for Property {
+    fn get_key(&self, name: &str) -> Option<&PropertyValue> {
+        self.body.as_ref().and_then(|b| b.get_key(name))
+    }
+
+    fn get_key_mut(&mut self, name: &str) -> Option<&mut PropertyValue> {
+        self.body.as_mut().and_then(|b| b.get_key_mut(name))
+    }
+
+    fn get_index(&self, index: usize) -> Option<&PropertyValue> {
+        self.body.as_ref().and_then(|b| b.get_index(index))
+    }
+
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut PropertyValue> {
+        self.body.as_mut().and_then(|b| b.get_index_mut(index))
+    }
+}
+
 #[binrw]
 #[derive(Debug)]
 pub struct SaveGameData {
@@ -810,6 +1011,32 @@ pub struct SaveGameData {
     #[br(parse_with = |r, e, _: ()| read_properties_with_footer(r, e, (4,)))]
     pub properties: Vec<Property>,
     pub extra: u32,
+}
+
+impl Indexable for SaveGameData {
+    fn get_key(&self, name: &str) -> Option<&PropertyValue> {
+        self.properties.iter().find_map(|p| if p.name == name {
+            p.body.as_ref().map(|b| &b.value)
+        } else {
+            None
+        })
+    }
+
+    fn get_key_mut(&mut self, name: &str) -> Option<&mut PropertyValue> {
+        self.properties.iter_mut().find_map(|p| if p.name == name {
+            p.body.as_mut().map(|b| &mut b.value)
+        } else {
+            None
+        })
+    }
+
+    fn get_index(&self, _index: usize) -> Option<&PropertyValue> {
+        None
+    }
+
+    fn get_index_mut(&mut self, _index: usize) -> Option<&mut PropertyValue> {
+        None
+    }
 }
 
 #[binrw]
