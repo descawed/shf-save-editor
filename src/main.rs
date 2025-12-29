@@ -26,6 +26,27 @@ fn main() -> eframe::Result<()> {
 
 const BINARY_DATA_CUTOFF: usize = 10;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListAction {
+    None,
+    Delete(usize),
+    Insert(usize),
+}
+
+impl ListAction {
+    fn update(&mut self, action: Self) {
+        if self == &Self::None {
+            *self = action;
+        }
+    }
+}
+
+impl Default for ListAction {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 #[derive(Default)]
 struct AppState {
     save_path: Option<PathBuf>,
@@ -197,7 +218,23 @@ impl AppState {
         ui.label(desc);
     }
 
-    fn show_property_value(ui: &mut egui::Ui, label: &str, property_value: &mut PropertyValue, flags: Option<&mut u8>) {
+    fn show_list_context_menu(ui: &mut egui::Ui, index: usize) -> ListAction {
+        ui.menu_button("☰", |ui| {
+            if ui.button("Insert above").clicked() {
+                return ListAction::Insert(index);
+            }
+            if ui.button("Insert below").clicked() {
+                return ListAction::Insert(index + 1);
+            }
+            ui.separator();
+            if ui.button("Delete").clicked() {
+                return ListAction::Delete(index);
+            }
+            ListAction::None
+        }).inner.unwrap_or_default()
+    }
+
+    fn show_property_value(ui: &mut egui::Ui, label: &str, property_value: &mut PropertyValue, flags: Option<&mut u8>, property_type: &PropertyType) {
         match property_value {
             PropertyValue::StrProperty(s) | PropertyValue::NameProperty(s) | PropertyValue::EnumProperty(s) | PropertyValue::ObjectProperty(s) => {
                 Self::text_input(ui, label, s);
@@ -292,20 +329,34 @@ impl AppState {
                     return;
                 }
 
+                let element_type = property_type.element_type();
                 egui::CollapsingHeader::new(format!("{label} ({num_values})"))
                     .show(ui, |ui| {
-                        let mut delete_index = None;
+                        let mut action = ListAction::None;
                         for (i, value) in values.iter_mut().enumerate() {
                             ui.horizontal(|ui| {
-                                if ui.button("🗑").clicked() {
-                                    delete_index = Some(i);
-                                }
-                                Self::show_property_value(ui, &i.to_string(), value, None);
+                                action.update(Self::show_list_context_menu(ui, i));
+                                Self::show_property_value(ui, &i.to_string(), value, None, &element_type);
                             });
                         }
 
-                        if let Some(index) = delete_index {
-                            values.remove(index);
+                        let flags = match flags {
+                            Some(flags) => *flags,
+                            None => 0,
+                        };
+
+                        match action {
+                            ListAction::Insert(index) => {
+                                values.insert(index, element_type.make_default_value(flags));
+                            }
+                            ListAction::Delete(index) => {
+                                values.remove(index);
+                            }
+                            ListAction::None => (),
+                        }
+
+                        if values.is_empty() && ui.button("Insert").clicked() {
+                            values.push(element_type.make_default_value(flags));
                         }
                     });
             }
@@ -315,23 +366,42 @@ impl AppState {
                     .show(ui, |ui| {
                         Self::typed_input(ui, "Removed", removed_count);
 
-                        let mut delete_index = None;
+                        let mut action = ListAction::None;
+                        let key_type = property_type.element_type();
+                        let Some(value_type) = property_type.inner_types.last() else { return; };
                         for (i, value) in values.iter_mut().enumerate() {
                             ui.horizontal(|ui| {
-                                if ui.button("🗑").clicked() {
-                                    delete_index = Some(i);
-                                }
+                                action.update(Self::show_list_context_menu(ui, i));
                                 egui::CollapsingHeader::new(i.to_string())
                                     .default_open(true)
                                     .show(ui, |ui| {
-                                        Self::show_property_value(ui, "Key", &mut value.0, None);
-                                        Self::show_property_value(ui, "Value", &mut value.1, None);
+                                        Self::show_property_value(ui, "Key", &mut value.0, None, &key_type);
+                                        Self::show_property_value(ui, "Value", &mut value.1, None, &value_type);
                                     });
                             });
                         }
 
-                        if let Some(index) = delete_index {
-                            values.remove(index);
+                        let flags = match flags {
+                            Some(flags) => *flags,
+                            None => 0,
+                        };
+
+                        match action {
+                            ListAction::Insert(index) => {
+                                let key = key_type.make_default_value(flags);
+                                let value = value_type.make_default_value(flags);
+                                values.insert(index, (key, value));
+                            }
+                            ListAction::Delete(index) => {
+                                values.remove(index);
+                            }
+                            ListAction::None => (),
+                        }
+
+                        if values.is_empty() && ui.button("Insert").clicked() {
+                            let key = key_type.make_default_value(flags);
+                            let value = value_type.make_default_value(flags);
+                            values.push((key, value));
                         }
                     });
             }
@@ -354,7 +424,7 @@ impl AppState {
             });
         Self::typed_input(ui, "Flags", &mut property.flags);
 
-        Self::show_property_value(ui, "Value", &mut property.value, Some(&mut property.flags));
+        Self::show_property_value(ui, "Value", &mut property.value, Some(&mut property.flags), &property.property_type);
     }
 
     fn show_properties(ui: &mut egui::Ui, label: &str, properties: &mut Vec<Property>) {

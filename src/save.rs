@@ -10,7 +10,7 @@ use bitflags::bitflags;
 
 use crate::uobject::*;
 
-const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 26] = [
+const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 27] = [
     ("/Script/GameNoce.NocePlayerInventoryComponent", 8),
     // there are blueprint records inside this object that I don't know how to parse
     // "/Script/GameNoce.NoceInteractableBase",
@@ -19,6 +19,7 @@ const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 26] = [
     ("/Script/GameNoce.NocePlayerState", 8),
     ("/Script/GameNoce.NoceBodyPartGroupComponent", 8),
     ("/Script/GameNoce.NoceEnemyCharacter", 8),
+    ("/Script/GameNoce.NoceMapIconComponent", 8),
     ("/Script/Engine.ActorComponent", 8),
     ("/Script/GameNoce.NoceEnvironmentSubsystem", 4),
     ("/Script/GameNoce.NoceWorldManagerSubsystem", 4),
@@ -96,6 +97,14 @@ pub struct FString {
 }
 
 impl FString {
+    pub const fn new() -> Self {
+        Self { string: String::new() }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        Self { string: s.to_string() }
+    }
+
     pub const fn as_str(&self) -> &str {
         self.string.as_str()
     }
@@ -670,7 +679,43 @@ impl PropertyType {
                 };
                 Cow::Owned(Self { name, tags, inner_types })
             }
+            "StructProperty" if self.describe() == GAMEPLAY_TAG_CONTAINER_TYPE => Cow::Owned(Self { name: FString::from_str("NameProperty"), tags: Vec::new(), inner_types: Vec::new() }),
             _ => Cow::Borrowed(self),
+        }
+    }
+
+    pub fn make_default_value(&self, flags: u8) -> PropertyValue {
+        match self.name.as_str() {
+            "BoolProperty" => PropertyValue::BoolProperty(Some(false)),
+            "ByteProperty" => PropertyValue::ByteProperty(0),
+            "IntProperty" => PropertyValue::IntProperty(0),
+            "FloatProperty" => PropertyValue::FloatProperty(0.0),
+            "DoubleProperty" => PropertyValue::DoubleProperty(0.0),
+            "StrProperty" => PropertyValue::StrProperty(FString::new()),
+            "NameProperty" => PropertyValue::NameProperty(FString::new()),
+            "ObjectProperty" => PropertyValue::ObjectProperty(FString::new()),
+            "EnumProperty" => PropertyValue::EnumProperty(FString::new()),
+            "TextProperty" => PropertyValue::TextProperty { flags: TextFlags::empty(), data: TextData::None { values: Vec::new() } },
+            "StructProperty" => {
+                let description = self.describe();
+                if description == GAMEPLAY_TAG_CONTAINER_TYPE {
+                    PropertyValue::ArrayProperty { values: Vec::new() }
+                } else if description.starts_with(CORE_UOBJECT_TYPE_PREFIX) {
+                    // unwrap is safe because there must be a tag if the description matched the prefix
+                    let type_name = self.tags.first().unwrap().value.as_str();
+                    match make_default_uobject(type_name) {
+                        Some(object) => PropertyValue::CoreUObjectStructProperty(object),
+                        None => PropertyValue::UnknownProperty(Vec::new()),
+                    }
+                } else if flags != 0 {
+                    PropertyValue::UnknownProperty(Vec::new())
+                } else {
+                    PropertyValue::StructProperty(vec![Property::make_none()])
+                }
+            }
+            "ArrayProperty" => PropertyValue::ArrayProperty { values: Vec::new() },
+            "MapProperty" => PropertyValue::MapProperty { removed_count: 0, values: Vec::new() },
+            _ => PropertyValue::UnknownProperty(Vec::new()),
         }
     }
 }
@@ -720,6 +765,10 @@ pub struct Property {
 impl Property {
     pub const fn is_none(&self) -> bool {
         self.body.is_none()
+    }
+
+    pub fn make_none() -> Self {
+        Self { name: FString::from_str("None"), body: None }
     }
 
     pub fn custom_struct_footer_size(&self) -> Option<usize> {

@@ -41,7 +41,7 @@ fn uobject_to_bytes<'a, O: CoreUObject + BinWrite<Args<'a>=()>>(object: &O, endi
 }
 
 #[binrw]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FDateTime(u64);
 
 impl CoreUObject for FDateTime {
@@ -59,7 +59,7 @@ impl CoreUObject for FDateTime {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FTimespan(u64);
 
 impl CoreUObject for FTimespan {
@@ -77,7 +77,7 @@ impl CoreUObject for FTimespan {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Vector {
     x: f64,
     y: f64,
@@ -99,7 +99,7 @@ impl CoreUObject for Vector {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Quat {
     x: f64,
     y: f64,
@@ -122,7 +122,7 @@ impl CoreUObject for Quat {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LinearColor {
     r: f32,
     g: f32,
@@ -153,4 +153,15 @@ pub fn try_read_uobject<R: Read + Seek>(type_name: &str, reader: &mut R, endian:
         "LinearColor" => Box::new(LinearColor::read_options(reader, endian, ())?),
         _ => return Ok(None),
     }))
+}
+
+pub fn make_default_uobject(type_name: &str) -> Option<Box<dyn CoreUObject>> {
+    match type_name {
+        "DateTime" => Some(Box::new(FDateTime::default())),
+        "Timespan" => Some(Box::new(FTimespan::default())),
+        "Vector" => Some(Box::new(Vector::default())),
+        "Quat" => Some(Box::new(Quat::default())),
+        "LinearColor" => Some(Box::new(LinearColor::default())),
+        _ => None,
+    }
 }
