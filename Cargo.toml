@@ -10,14 +10,13 @@ repository = "https://github.com/descawed/shf-save-editor"
 [profile.release]
 strip = true
 lto = true
-panic = "abort"
 
 [dependencies]
 anyhow = "1.0.100"
 binrw = "0.15.0"
 bitflags = "2.10.0"
-eframe = "0.33"
-egui = "0.33"
+eframe = { version = "0.33", features = ["persistence"] }
+egui = { version = "0.33", features = ["persistence"] }
 rfd = "0.16"
 
 [build-dependencies]
