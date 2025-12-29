@@ -8,6 +8,8 @@ use anyhow::anyhow;
 use binrw::{binrw, binwrite, BinRead, BinReaderExt, BinResult, BinWrite, Endian, NullString};
 use bitflags::bitflags;
 
+use crate::uobject::*;
+
 const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 26] = [
     ("/Script/GameNoce.NocePlayerInventoryComponent", 8),
     // there are blueprint records inside this object that I don't know how to parse
@@ -39,6 +41,7 @@ const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 26] = [
     ("/Script/GameNoce.NocePickupsSubsystem", 4),
 ];
 const GAMEPLAY_TAG_CONTAINER_TYPE: &str = "StructProperty</Script/GameplayTags.GameplayTagContainer>";
+const CORE_UOBJECT_TYPE_PREFIX: &str = "StructProperty</Script/CoreUObject.";
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -281,7 +284,7 @@ fn read_properties_with_footer(footer_size: u64) -> BinResult<Vec<Property>> {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[br(import(extra_bytes: usize))]
 pub struct CustomStruct {
     // this field is ignored on read because it's read as part of the ArrayProperty before we detect
@@ -303,7 +306,7 @@ impl CustomStruct {
 }
 
 #[binwrite]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PropertyValue {
     StrProperty(FString),
     BoolProperty(#[bw(map = |b| b.map(|b| b as u8))] Option<bool>),
@@ -321,6 +324,7 @@ pub enum PropertyValue {
     ObjectProperty(FString),
     StructProperty(Vec<Property>),
     CustomStructProperty(CustomStruct),
+    CoreUObjectStructProperty(#[bw(write_with = write_uobject)] Box<dyn CoreUObject>),
     ArrayProperty {
         #[bw(calc = self.array_len().unwrap() as u32)]
         count: u32,
@@ -346,6 +350,7 @@ impl PropertyValue {
             Self::TextProperty { data, .. } => 4 + data.size(),
             Self::StructProperty(props) => props.iter().map(Property::size).sum::<usize>(),
             Self::CustomStructProperty(s) => s.size(),
+            Self::CoreUObjectStructProperty(s) => s.size(),
             Self::ArrayProperty { values } => 4 + values.iter().map(PropertyValue::size).sum::<usize>(),
             Self::MapProperty { values, .. } => 8 + values.iter().map(|(k, v)| k.size() + v.size()).sum::<usize>(),
             Self::UnknownProperty(v) => v.len(),
@@ -419,7 +424,8 @@ impl BinRead for PropertyValue {
             "StructProperty" => {
                 // non-zero flags (or possibly just 08) seems to indicate types that don't have explicit field descriptions
                 if args.flags != 0 {
-                    if args.property_type.describe() == GAMEPLAY_TAG_CONTAINER_TYPE {
+                    let description = args.property_type.describe();
+                    if description == GAMEPLAY_TAG_CONTAINER_TYPE {
                         // data is effectively an ArrayProperty[NameProperty]
                         let count = u32::read_options(reader, endian, ())? as usize;
                         let mut values = Vec::with_capacity(count);
@@ -427,6 +433,17 @@ impl BinRead for PropertyValue {
                             values.push(Self::NameProperty(FString::read_options(reader, endian, ())?));
                         }
                         Self::ArrayProperty { values }
+                    } else if description.starts_with(CORE_UOBJECT_TYPE_PREFIX) {
+                        // unwrap is safe because there must be a tag if the description matched the prefix
+                        let type_name = args.property_type.tags.first().unwrap().value.as_str();
+                        match try_read_uobject(type_name, reader, endian)? {
+                            Some(object) => Self::CoreUObjectStructProperty(object),
+                            None => {
+                                let mut buf = vec![0u8; args.data_size as usize];
+                                reader.read_exact(&mut buf)?;
+                                Self::UnknownProperty(buf)
+                            }
+                        }
                     } else {
                         let mut buf = vec![0u8; args.data_size as usize];
                         reader.read_exact(&mut buf)?;
@@ -659,7 +676,7 @@ impl PropertyType {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PropertyBody {
     pub property_type: PropertyType,
     #[bw(calc = value.size() as u32)]
@@ -693,7 +710,7 @@ impl PropertyBody {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Property {
     pub name: FString,
     #[br(if(name != "None" && name != ""))]
@@ -737,7 +754,7 @@ impl Property {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SaveGameData {
     pub type_name: FString,
     pub flags: u8,
@@ -747,7 +764,7 @@ pub struct SaveGameData {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SaveGame {
     pub header: SaveGameHeader,
     pub custom_format_data: CustomFormatData,

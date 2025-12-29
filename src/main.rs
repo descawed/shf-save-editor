@@ -2,7 +2,6 @@
 
 use std::fs::File;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use anyhow::Result;
 use binrw::BinReaderExt;
@@ -12,6 +11,9 @@ use egui::{RichText, ViewportCommand};
 
 mod save;
 use save::*;
+
+mod uobject;
+use uobject::*;
 
 fn main() -> eframe::Result<()> {
     let options = NativeOptions::default();
@@ -97,12 +99,12 @@ impl AppState {
         }
     }
 
-    fn typed_input<T: ToString + FromStr>(ui: &mut egui::Ui, label: &str, value: &mut T) {
+    fn typed_input<T: Stringable + ?Sized>(ui: &mut egui::Ui, label: &str, value: &mut T) {
         ui.horizontal(|ui| {
             ui.label(format!("{label}: "));
             let mut string = value.to_string();
-            if ui.text_edit_singleline(&mut string).changed() && let Ok(parsed) = string.parse::<T>() {
-                *value = parsed;
+            if ui.text_edit_singleline(&mut string).changed() {
+                value.try_set_from_str(&string);
             }
         });
     }
@@ -272,6 +274,15 @@ impl AppState {
                         Self::typed_input(ui, "Flags", &mut custom_struct.flags);
                         Self::show_properties(ui, "Properties", &mut custom_struct.properties);
                         Self::show_binary_data(ui, "Extra", &custom_struct.extra);
+                    });
+            }
+            PropertyValue::CoreUObjectStructProperty(object) => {
+                egui::CollapsingHeader::new(label)
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for (name, field) in object.fields_mut() {
+                            Self::typed_input(ui, name, field);
+                        }
                     });
             }
             PropertyValue::ArrayProperty { values } => {
