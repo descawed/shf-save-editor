@@ -104,9 +104,31 @@ impl AppState {
         }
     }
 
-    fn save_as(&mut self) {
-        let Some(ref save) = self.save else { return; };
+    fn save_to(&mut self, path: PathBuf) {
+        let Some(ref save) = self.save else {
+            self.save_path = Some(path);
+            return;
+        };
 
+        let result: anyhow::Result<()> = (|| {
+            let mut file = File::create(&path)?;
+            file.write_le(save)?;
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            self.error_message = Some(format!("Failed to save: {err}"));
+        }
+
+        self.save_path = Some(path);
+    }
+
+    fn save(&mut self) {
+        let Some(save_path) = self.save_path.take() else { return; };
+        self.save_to(save_path);
+    }
+
+    fn save_as(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .add_filter("Silent Hill f save", &["sav"]);
 
@@ -117,17 +139,7 @@ impl AppState {
         }
 
         if let Some(path) = dialog.save_file() {
-            let result: anyhow::Result<()> = (|| {
-                let mut file = File::create(&path)?;
-                file.write_le(save)?;
-                Ok(())
-            })();
-
-            if let Err(err) = result {
-                self.error_message = Some(format!("Failed to save: {err}"));
-            } else {
-                self.save_path = Some(path);
-            }
+            self.save_to(path);
         }
     }
 
@@ -494,13 +506,25 @@ impl eframe::App for AppState {
                         ui.close();
                         self.open_save();
                     }
+
+                    ui.separator();
+
                     let can_save = self.save.is_some();
+
+                    if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
+                        ui.close();
+                        self.save();
+                    }
+
                     if ui.add_enabled(can_save, egui::Button::new("Save as..."))
                         .clicked()
                     {
                         ui.close();
                         self.save_as();
                     }
+
+                    ui.separator();
+
                     if ui.button("Exit").clicked() {
                         ui.close();
                         ctx.send_viewport_cmd(ViewportCommand::Close);
