@@ -32,11 +32,37 @@ impl Default for ListAction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppTab {
+    Simple,
+    Advanced,
+}
+
+impl AppTab {
+    const fn list() -> [Self; 2] {
+        [Self::Simple, Self::Advanced]
+    }
+
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Simple => "Simple",
+            Self::Advanced => "Advanced",
+        }
+    }
+}
+
+impl Default for AppTab {
+    fn default() -> Self {
+        Self::Simple
+    }
+}
+
 #[derive(Default)]
 pub struct AppState {
     save_path: Option<PathBuf>,
     save: Option<SaveGame>,
     error_message: Option<String>,
+    tab: AppTab,
 }
 
 impl AppState {
@@ -445,6 +471,17 @@ impl AppState {
         Self::show_properties(ui, "Properties", &mut save.save_data.properties);
         Self::typed_input(ui, "Extra", &mut save.save_data.extra);
     }
+
+    fn show_advanced_view(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Header")
+            .show(ui, |ui| self.show_header(ui));
+
+        egui::CollapsingHeader::new("Custom Format")
+            .show(ui, |ui| self.show_custom_format(ui));
+
+        egui::CollapsingHeader::new("Save Game")
+            .show(ui, |ui| self.show_save_game(ui));
+    }
 }
 
 impl eframe::App for AppState {
@@ -472,48 +509,39 @@ impl eframe::App for AppState {
             });
         });
 
-        // Optional left tree panel when a file is loaded
         if self.save.is_some() {
             egui::CentralPanel::default()
                 .show(ctx, |ui| {
-                    // Placeholder tree view using collapsing headers
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            egui::CollapsingHeader::new("Header")
-                                .show(ui, |ui| self.show_header(ui));
+                            ui.horizontal(|ui| {
+                                for tab in AppTab::list() {
+                                    if ui.selectable_label(self.tab == tab, tab.name()).clicked() {
+                                        self.tab = tab;
+                                    }
+                                }
+                            });
 
-                            egui::CollapsingHeader::new("Custom Format")
-                                .show(ui, |ui| self.show_custom_format(ui));
+                            ui.separator();
 
-                            egui::CollapsingHeader::new("Save Game")
-                                .show(ui, |ui| self.show_save_game(ui));
+                            match self.tab {
+                                AppTab::Simple => (),
+                                AppTab::Advanced => self.show_advanced_view(ui),
+                            }
                         });
                 });
         } else {
-            // Main content
             egui::CentralPanel::default().show(ctx, |ui| {
-                match &self.save_path {
-                    None => {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(40.0);
-                            ui.heading("Silent Hill f Save Editor");
-                            ui.label("Open a .sav file to begin.");
-                            ui.add_space(10.0);
-                            if ui.button("Open .sav...").clicked() {
-                                self.open_save();
-                            }
-                        });
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading("Silent Hill f Save Editor");
+                    ui.label("Open a .sav file to begin.");
+                    ui.add_space(10.0);
+                    if ui.button("Open .sav...").clicked() {
+                        self.open_save();
                     }
-                    Some(path) => {
-                        // Right side: file info / placeholder content panel
-                        ui.vertical_centered(|ui| {
-                            ui.heading("File Loaded");
-                            ui.monospace(path.display().to_string());
-                            ui.label("Tree contents to be implemented.");
-                        });
-                    }
-                }
+                });
             });
         }
 
