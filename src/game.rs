@@ -2,6 +2,31 @@ pub const MAX_UPGRADE_LEVEL: i32 = 6;
 
 pub const PLAYER_INVENTORY_COMPONENT_CLASS: &str = "/Script/GameNoce.NocePlayerInventoryComponent";
 
+pub trait Item: Sized {
+    fn none() -> &'static Self;
+    
+    fn all() -> &'static [Self];
+    
+    fn id_index(&self) -> i32;
+
+    fn name(&self) -> &'static str;
+}
+
+const fn get_item_from_id<T: Item>(id: i32, no_item: &'static T, items: &'static [T]) -> Option<&'static T> {
+    if id == -1 {
+        Some(no_item)
+    } else if id < 0 {
+        None
+    } else {
+        let id = id as usize;
+        if id < items.len() {
+            Some(&items[id])
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Weapon {
     pub id_index: i32,
@@ -12,6 +37,24 @@ pub struct Weapon {
 impl Weapon {
     pub const fn new(id_index: i32, name: &'static str, max_durability: f32) -> Self {
         Self { id_index, name, max_durability }
+    }
+}
+
+impl Item for Weapon {
+    fn none() -> &'static Self {
+        &NO_WEAPON
+    }
+    
+    fn all() -> &'static [Self] {
+        &WEAPONS
+    }
+    
+    fn id_index(&self) -> i32 {
+        self.id_index
+    }
+
+    fn name(&self) -> &'static str {
+        self.name
     }
 }
 
@@ -36,18 +79,7 @@ pub const WEAPONS: [Weapon; 15] = [
 ];
 
 pub const fn get_weapon_from_id(id: i32) -> Option<&'static Weapon> {
-    if id == -1 {
-        Some(&NO_WEAPON)
-    } else if id < 0 {
-        None
-    } else {
-        let id = id as usize;
-        if id < WEAPONS.len() {
-            Some(&WEAPONS[id])
-        } else {
-            None
-        }
-    }
+    get_item_from_id(id, &NO_WEAPON, &WEAPONS)
 }
 
 pub const MIN_WEAPONS: usize = 3;
@@ -66,7 +98,26 @@ impl ConsumableItem {
     }
 }
 
-pub const NO_CONSUMABLE_ITEM: ConsumableItem = ConsumableItem::new(-1, "None", 0);
+impl Item for ConsumableItem {
+    fn none() -> &'static Self {
+        &NO_CONSUMABLE_ITEM
+    }
+    
+    fn all() -> &'static [Self] {
+        &CONSUMABLE_ITEMS
+    }
+    
+    fn id_index(&self) -> i32 {
+        self.id_index
+    }
+
+    fn name(&self) -> &'static str {
+        self.name
+    }
+}
+
+pub const DEFAULT_MAX_CONSUMABLE_ITEM_STACK: i32 = 99;
+pub const NO_CONSUMABLE_ITEM: ConsumableItem = ConsumableItem::new(-1, "None", DEFAULT_MAX_CONSUMABLE_ITEM_STACK);
 pub const CONSUMABLE_ITEMS: [ConsumableItem; 16] = [
     ConsumableItem::new(0, "Red Capsules", 99),
     ConsumableItem::new(1, "Red Capsules (ending 1)", 99),
@@ -85,6 +136,13 @@ pub const CONSUMABLE_ITEMS: [ConsumableItem; 16] = [
     ConsumableItem::new(14, "Antique Comb", 1),
     ConsumableItem::new(15, "Toolkit", 3),
 ];
+
+pub const fn get_consumable_item_from_id(id: i32) -> Option<&'static ConsumableItem> {
+    get_item_from_id(id, &NO_CONSUMABLE_ITEM, &CONSUMABLE_ITEMS)
+}
+
+pub const MIN_CONSUMABLE_ITEMS: usize = 8;
+pub const MAX_CONSUMABLE_ITEMS: usize = 14;
 
 pub const KEY_ITEM_NAMES: [&str; 88] = [
     "Capsule Case",

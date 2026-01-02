@@ -559,6 +559,28 @@ impl AppState {
         Self::typed_input(ui, "", faith_value);
     }
 
+    fn show_inventory_delete(ui: &mut egui::Ui, index: usize, min_index: usize, delete_index: &mut Option<usize>) {
+        let can_delete = index >= min_index;
+        if ui.add_enabled(can_delete, egui::Button::new("🗑")).clicked() {
+            *delete_index = Some(index);
+        }
+    }
+
+    fn show_item_dropdown<T: Item + 'static>(ui: &mut egui::Ui, salt: &str, id_index: &mut i32, item: Option<&T>) {
+        let dropdown = egui::ComboBox::from_id_salt(salt);
+        let dropdown = match item {
+            Some(item) => dropdown.selected_text(item.name()),
+            None => dropdown.selected_text(format!("Unknown {}", *id_index)),
+        };
+        dropdown.show_ui(ui, |ui| {
+            let none = T::none();
+            ui.selectable_value(id_index, none.id_index(), none.name());
+            for item in T::all() {
+                ui.selectable_value(id_index, item.id_index(), item.name());
+            }
+        });
+    }
+
     fn show_weapons(ui: &mut egui::Ui, inventory: &mut impl Indexable, world: &str) {
         ui.heading(format!("{world} Weapons"));
 
@@ -577,27 +599,14 @@ impl AppState {
         let mut delete_index = None;
         for (i, inventory_weapon) in values.iter_mut().enumerate() {
             ui.horizontal(|ui| {
-                let can_delete = i >= MIN_WEAPONS;
-                if ui.add_enabled(can_delete, egui::Button::new("🗑")).clicked() {
-                    delete_index = Some(i);
-                }
+                Self::show_inventory_delete(ui, i, MIN_WEAPONS, &mut delete_index);
 
                 let max_durability = match inventory_weapon.get_key_mut("IDIndex") {
                     Some(PropertyValue::IntProperty(id_index)) => {
                         let weapon = get_weapon_from_id(*id_index);
 
                         ui.label("Weapon");
-                        let dropdown = egui::ComboBox::from_id_salt(format!("{world} weapon {i}"));
-                        let dropdown = match weapon {
-                            Some(weapon) => dropdown.selected_text(weapon.name),
-                            None => dropdown.selected_text(format!("Unknown {}", *id_index)),
-                        };
-                        dropdown.show_ui(ui, |ui| {
-                            ui.selectable_value(id_index, NO_WEAPON.id_index, NO_WEAPON.name);
-                            for weapon in &WEAPONS {
-                                ui.selectable_value(id_index, weapon.id_index, weapon.name);
-                            }
-                        });
+                        Self::show_item_dropdown(ui, &format!("{world} weapon {i}"), id_index, weapon);
 
                         // grab the weapon definition again in case it changed
                         match get_weapon_from_id(*id_index) {
@@ -655,10 +664,70 @@ impl AppState {
         }
     }
 
+    fn show_consumables(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
+        ui.heading("Consumables");
+
+        let Some(PropertyValue::ArrayProperty { values, .. }) = inventory.get_key_mut("Consumables") else {
+            ui.colored_label(egui::Color32::RED, "Error: missing or invalid consumables");
+            return;
+        };
+
+        let mut delete_index = None;
+        for (i, inventory_consumable) in values.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                Self::show_inventory_delete(ui, i, MIN_CONSUMABLE_ITEMS, &mut delete_index);
+
+                let max_quantity = match inventory_consumable.get_key_mut("IDIndex") {
+                    Some(PropertyValue::IntProperty(id_index)) => {
+                        let consumable = get_consumable_item_from_id(*id_index);
+
+                        ui.label("Item");
+                        Self::show_item_dropdown(ui, &format!("consumable {i}"), id_index, consumable);
+
+                        match consumable {
+                            Some(consumable) => consumable.max_stack,
+                            None => DEFAULT_MAX_CONSUMABLE_ITEM_STACK,
+                        }
+                    }
+                    _ => {
+                        ui.colored_label(egui::Color32::RED, "Error: missing or invalid consumable ID index");
+                        DEFAULT_MAX_CONSUMABLE_ITEM_STACK
+                    }
+                };
+
+                match inventory_consumable.get_key_mut("Quantity") {
+                    Some(PropertyValue::IntProperty(quantity)) => {
+                        Self::typed_input(ui, "Quantity", quantity);
+                        ui.label(format!(" / {max_quantity}"));
+                    }
+                    _ => {
+                        ui.colored_label(egui::Color32::RED, "Error: missing or invalid quantity");
+                    }
+                }
+            });
+        }
+
+        if let Some(index) = delete_index {
+            values.remove(index);
+        }
+
+        if values.len() < MAX_CONSUMABLE_ITEMS && ui.button("Add consumable").clicked() {
+            values.push(
+                PropertyValue::StructProperty(vec![
+                    Property::new_scalar("Quantity", PropertyValue::IntProperty(0)),
+                    Property::new_scalar("IDIndex", PropertyValue::IntProperty(NO_CONSUMABLE_ITEM.id_index)),
+                    Property::new_none(),
+                ])
+            );
+        }
+    }
+
     fn show_inventory(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
         Self::show_weapons(ui, inventory, "Fog");
         ui.separator();
         Self::show_weapons(ui, inventory, "Dark");
+        ui.separator();
+        Self::show_consumables(ui, inventory);
     }
 
     fn show_simple_view(&mut self, ui: &mut egui::Ui) {
