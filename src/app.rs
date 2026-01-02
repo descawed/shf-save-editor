@@ -722,12 +722,58 @@ impl AppState {
         }
     }
 
+    fn show_named_items(ui: &mut egui::Ui, item_flags: &mut [PropertyValue], item_names: &[&str]) {
+        if ui.button("Add all").clicked() {
+            for item_flag in item_flags.iter_mut() {
+                *item_flag = PropertyValue::BoolProperty(Some(true));
+            }
+        }
+
+        for (i, item_flag) in item_flags.iter_mut().enumerate() {
+            let PropertyValue::BoolProperty(Some(item_flag)) = item_flag else {
+                ui.colored_label(egui::Color32::RED, "Error: missing or invalid item flag");
+                continue;
+            };
+
+            match item_names.get(i) {
+                Some(item_name) => ui.checkbox(item_flag, *item_name),
+                None => ui.checkbox(item_flag, format!("Unknown {i}")),
+            };
+        }
+    }
+
+    fn show_key_items(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
+        ui.heading("Key Items");
+
+        let Some(PropertyValue::ArrayProperty { values, .. }) = inventory.get_key_mut("KeyItems") else {
+            ui.colored_label(egui::Color32::RED, "Error: missing or invalid key items");
+            return;
+        };
+
+        Self::show_named_items(ui, values, &KEY_ITEM_NAMES);
+    }
+
+    fn show_letters(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
+        ui.heading("Letters");
+
+        let Some(PropertyValue::ArrayProperty { values, .. }) = inventory.get_key_mut("Letters") else {
+            ui.colored_label(egui::Color32::RED, "Error: missing or invalid letters");
+            return;
+        };
+
+        Self::show_named_items(ui, values, &LETTER_NAMES);
+    }
+
     fn show_inventory(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
         Self::show_weapons(ui, inventory, "Fog");
         ui.separator();
         Self::show_weapons(ui, inventory, "Dark");
         ui.separator();
         Self::show_consumables(ui, inventory);
+        ui.separator();
+        Self::show_key_items(ui, inventory);
+        ui.separator();
+        Self::show_letters(ui, inventory);
     }
 
     fn show_simple_view(&mut self, ui: &mut egui::Ui) {
