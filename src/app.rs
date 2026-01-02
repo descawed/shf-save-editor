@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -764,12 +765,135 @@ impl AppState {
         Self::show_named_items(ui, values, &LETTER_NAMES);
     }
 
+    fn set_omamori_dropdown_text(dropdown: egui::ComboBox, id_index: i32) -> egui::ComboBox {
+        match OMAMORI_NAMES.get(id_index as usize) {
+            Some(name) => dropdown.selected_text(*name),
+            None if id_index == -1 => dropdown.selected_text("None"),
+            None => dropdown.selected_text(format!("Unknown {id_index}")),
+        }
+    }
+
+    fn show_omamori(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
+        ui.heading("Omamori");
+
+        ui.label("Obtained");
+        let mut obtained = HashSet::new();
+        match inventory.get_key_mut("Omamories") {
+            Some(PropertyValue::ArrayProperty { values, .. }) => {
+                for value in values.iter() {
+                    if let Some(PropertyValue::IntProperty(id_index)) = value.get_key("IDIndex") && *id_index >= 0 {
+                        obtained.insert(*id_index);
+                    }
+                }
+
+                if ui.button("Add all").clicked() {
+                    for i in 0..OMAMORI_NAMES.len() {
+                        if !obtained.contains(&(i as i32)) {
+                            values.push(
+                                PropertyValue::StructProperty(vec![
+                                    Property::new_scalar("IDIndex", PropertyValue::IntProperty(i as i32)),
+                                    Property::new_none(),
+                                ])
+                            );
+                        }
+                    }
+                }
+
+                let mut delete_index = None;
+
+                for (i, value) in values.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        Self::show_inventory_delete(ui, i, 0, &mut delete_index);
+
+                        let Some(PropertyValue::IntProperty(id_index)) = value.get_key_mut("IDIndex") else {
+                            ui.colored_label(egui::Color32::RED, "Error: missing or invalid omamori index");
+                            return;
+                        };
+
+                        let dropdown = egui::ComboBox::from_id_salt(format!("obtained omamori {i}"));
+                        let dropdown = Self::set_omamori_dropdown_text(dropdown, *id_index);
+                        dropdown.show_ui(ui, |ui| {
+                            ui.selectable_value(id_index, -1, "None");
+                            for (i, name) in OMAMORI_NAMES.iter().enumerate() {
+                                let i = i as i32;
+                                // only show this omamori + ones that we don't already have
+                                if i == *id_index || !obtained.contains(&i) {
+                                    ui.selectable_value(id_index, i, *name);
+                                }
+                            }
+                        });
+                    });
+                }
+
+                if let Some(index) = delete_index {
+                    values.remove(index);
+                }
+
+                if obtained.len() < OMAMORI_NAMES.len() && ui.button("Add omamori").clicked() {
+                    values.push(
+                        PropertyValue::StructProperty(vec![
+                            Property::new_scalar("IDIndex", PropertyValue::IntProperty(-1)),
+                            Property::new_none(),
+                        ])
+                    );
+                }
+            }
+            _ => {
+                ui.colored_label(egui::Color32::RED, "Error: missing or invalid omamori inventory");
+            }
+        }
+
+        ui.label("Equipped");
+        match inventory.get_key_mut("EquippedOmamories") {
+            Some(PropertyValue::ArrayProperty { values, .. }) => {
+                let mut delete_index = None;
+
+                for (i, value) in values.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        Self::show_inventory_delete(ui, i, MIN_OMAMORI_SLOTS, &mut delete_index);
+
+                        let PropertyValue::IntProperty(id_index) = value else {
+                            ui.colored_label(egui::Color32::RED, "Error: missing or invalid omamori index");
+                            return;
+                        };
+
+                        let dropdown = egui::ComboBox::from_id_salt(format!("equipped omamori {i}"));
+                        let dropdown = Self::set_omamori_dropdown_text(dropdown, *id_index);
+                        dropdown.show_ui(ui, |ui| {
+                            ui.selectable_value(id_index, -1, "None");
+                            for (i, name) in OMAMORI_NAMES.iter().enumerate() {
+                                let i = i as i32;
+                                // only show this omamori + ones that we have
+                                if i == *id_index || obtained.contains(&i) {
+                                    ui.selectable_value(id_index, i, *name);
+                                }
+                            }
+                        });
+                    });
+                }
+
+                if let Some(index) = delete_index {
+                    values.remove(index);
+                }
+
+                if values.len() < MAX_OMAMORI_SLOTS && ui.button("Add omamori").clicked() {
+                    values.push(PropertyValue::IntProperty(-1));
+                }
+            }
+            _ => {
+                ui.colored_label(egui::Color32::RED, "Error: missing or invalid equipped omamori inventory");
+            }
+        }
+    }
+
     fn show_inventory(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
         Self::show_weapons(ui, inventory, "Fog");
         ui.separator();
         Self::show_weapons(ui, inventory, "Dark");
         ui.separator();
         Self::show_consumables(ui, inventory);
+        ui.separator();
+        Self::show_omamori(ui, inventory);
         ui.separator();
         Self::show_key_items(ui, inventory);
         ui.separator();
