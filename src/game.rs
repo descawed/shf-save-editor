@@ -4,9 +4,9 @@ pub const PLAYER_INVENTORY_COMPONENT_CLASS: &str = "/Script/GameNoce.NocePlayerI
 
 pub trait Item: Sized {
     fn none() -> &'static Self;
-    
+
     fn all() -> &'static [Self];
-    
+
     fn id_index(&self) -> i32;
 
     fn name(&self) -> &'static str;
@@ -44,11 +44,11 @@ impl Item for Weapon {
     fn none() -> &'static Self {
         &NO_WEAPON
     }
-    
+
     fn all() -> &'static [Self] {
         &WEAPONS
     }
-    
+
     fn id_index(&self) -> i32 {
         self.id_index
     }
@@ -102,11 +102,11 @@ impl Item for ConsumableItem {
     fn none() -> &'static Self {
         &NO_CONSUMABLE_ITEM
     }
-    
+
     fn all() -> &'static [Self] {
         &CONSUMABLE_ITEMS
     }
-    
+
     fn id_index(&self) -> i32 {
         self.id_index
     }
@@ -143,6 +143,50 @@ pub const fn get_consumable_item_from_id(id: i32) -> Option<&'static ConsumableI
 
 pub const MIN_CONSUMABLE_ITEMS: usize = 8;
 pub const MAX_CONSUMABLE_ITEMS: usize = 14;
+
+pub const OMAMORI_NAMES: [&str; 41] = [
+    "Weasel",
+    "Serpent",
+    "Cat",
+    "Clam",
+    "Hawk",
+    "Owl",
+    "Pine",
+    "Bamboo",
+    "Plum",
+    "Kudzu Leaf",
+    "Boar",
+    "Rabbit",
+    "Horse",
+    "Crow",
+    "Hound",
+    "Swallow",
+    "Bear",
+    "Wolf",
+    "Spider",
+    "Swordfish",
+    "Goat",
+    "Turtle",
+    "Elephant",
+    "Beetle",
+    "Butterfly",
+    "Suzuran",
+    "Dolphin",
+    "Camel",
+    "Bull",
+    "Otter",
+    "Willow",
+    "Cuckoo",
+    "Shrew Mole",
+    "Tanuki",
+    "Crab",
+    "Sakura",
+    "Whale",
+    "Mantis",
+    "Daisy",
+    "Blessed Hand Mirror",
+    "Peony",
+];
 
 pub const KEY_ITEM_NAMES: [&str; 88] = [
     "Capsule Case",
