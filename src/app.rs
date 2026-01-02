@@ -358,6 +358,7 @@ impl AppState {
 
                 let element_type = property_type.element_type();
                 egui::CollapsingHeader::new(format!("{label} ({num_values})"))
+                    .id_salt(label)
                     .show(ui, |ui| {
                         let mut action = ListAction::None;
                         for (i, value) in values.iter_mut().enumerate() {
@@ -470,6 +471,7 @@ impl AppState {
     fn show_properties(ui: &mut egui::Ui, label: &str, properties: &mut Vec<Property>) {
         let num_properties = properties.len();
         egui::CollapsingHeader::new(format!("{label} ({num_properties})"))
+            .id_salt(label)
             .show(ui, |ui| {
                 let mut action = ListAction::None;
                 let mut selected_type = None;
@@ -500,6 +502,7 @@ impl AppState {
                             }
                         });
                         egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
+                            .id_salt(i.to_string())
                             .show(ui, |ui| {
                                 Self::show_property(ui, property);
                             });
