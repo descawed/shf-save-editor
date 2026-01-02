@@ -382,6 +382,17 @@ impl CustomStruct {
     }
 }
 
+pub const SCALAR_TYPE_NAMES: [&str; 8] = [
+    "BoolProperty",
+    "ByteProperty",
+    "IntProperty",
+    "FloatProperty",
+    "DoubleProperty",
+    "StrProperty",
+    "ObjectProperty",
+    "NameProperty",
+];
+
 #[binwrite]
 #[derive(Debug)]
 pub enum PropertyValue {
@@ -417,6 +428,30 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    pub fn default_for_type(type_name: &str) -> Self {
+        match type_name {
+            "BoolProperty" => Self::BoolProperty(None),
+            "ByteProperty" => Self::ByteProperty(0),
+            "IntProperty" => Self::IntProperty(0),
+            "FloatProperty" => Self::FloatProperty(0.0),
+            "DoubleProperty" => Self::DoubleProperty(0.0),
+            "StrProperty" => Self::StrProperty(FString::new()),
+            "ObjectProperty" => Self::ObjectProperty(FString::new()),
+            "NameProperty" => Self::NameProperty(FString::new()),
+            "EnumProperty" => Self::EnumProperty(FString::new()),
+            "TextProperty" => Self::TextProperty {
+                flags: TextFlags::empty(),
+                data: TextData::None {
+                    values: Vec::new(),
+                },
+            },
+            "StructProperty" => Self::StructProperty(Vec::new()),
+            "ArrayProperty" => Self::ArrayProperty { values: Vec::new() },
+            "MapProperty" => Self::MapProperty { removed_count: 0, values: Vec::new() },
+            _ => Self::UnknownProperty(Vec::new()),
+        }
+    }
+
     pub fn size(&self) -> usize {
         match self {
             Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) | Self::ObjectProperty(s) => s.byte_size(),
