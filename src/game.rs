@@ -144,6 +144,8 @@ pub const fn get_consumable_item_from_id(id: i32) -> Option<&'static ConsumableI
 pub const MIN_CONSUMABLE_ITEMS: usize = 8;
 pub const MAX_CONSUMABLE_ITEMS: usize = 14;
 
+pub const MIN_OMAMORI_SLOTS: usize = 1;
+pub const MAX_OMAMORI_SLOTS: usize = 5;
 pub const OMAMORI_NAMES: [&str; 41] = [
     "Weasel",
     "Serpent",
