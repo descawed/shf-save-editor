@@ -12,7 +12,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Silent Hill f Save Editor",
         options,
-        Box::new(|_cc| Ok(Box::<app::AppState>::default())),
+        Box::new(|cc| Ok(Box::new(app::AppState::load_app(cc)))),
     )
 }
 
