@@ -826,19 +826,18 @@ impl eframe::App for AppState {
         if self.save.is_some() {
             egui::CentralPanel::default()
                 .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        for tab in AppTab::list() {
+                            if ui.selectable_label(self.tab == tab, tab.name()).clicked() {
+                                self.tab = tab;
+                            }
+                        }
+                    });
+                    ui.separator();
+
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                for tab in AppTab::list() {
-                                    if ui.selectable_label(self.tab == tab, tab.name()).clicked() {
-                                        self.tab = tab;
-                                    }
-                                }
-                            });
-
-                            ui.separator();
-
                             match self.tab {
                                 AppTab::Simple => self.show_simple_view(ui),
                                 AppTab::Advanced => self.show_advanced_view(ui),
