@@ -3,6 +3,7 @@
 use eframe::NativeOptions;
 
 mod app;
+mod game;
 mod save;
 mod uobject;
 

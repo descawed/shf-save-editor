@@ -452,6 +452,25 @@ impl PropertyValue {
             _ => return None,
         })
     }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::StrProperty(_) => "StrProperty",
+            Self::BoolProperty(_) => "BoolProperty",
+            Self::ByteProperty(_) => "ByteProperty",
+            Self::IntProperty(_) => "IntProperty",
+            Self::FloatProperty(_) => "FloatProperty",
+            Self::DoubleProperty(_) => "DoubleProperty",
+            Self::TextProperty { .. } => "TextProperty",
+            Self::EnumProperty(_) => "EnumProperty",
+            Self::NameProperty(_) => "NameProperty",
+            Self::ObjectProperty(_) => "ObjectProperty",
+            Self::StructProperty(_) | Self::CoreUObjectStructProperty(_) => "StructProperty",
+            Self::ArrayProperty { .. } | Self::CustomStructProperty(_) => "ArrayProperty",
+            Self::MapProperty { .. } => "MapProperty",
+            Self::UnknownProperty(_) => "",
+        }
+    }
 }
 
 impl Indexable for PropertyValue {
@@ -781,6 +800,10 @@ pub struct PropertyType {
 }
 
 impl PropertyType {
+    pub fn new_scalar(name: &str) -> Self {
+        Self { name: FString::from_str(name), tags: Vec::new(), inner_types: Vec::new() }
+    }
+
     fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag], inner_types: &[Self]) {
         desc.push_str(name);
 
@@ -875,7 +898,7 @@ impl PropertyType {
                 } else if flags != 0 {
                     PropertyValue::UnknownProperty(Vec::new())
                 } else {
-                    PropertyValue::StructProperty(vec![Property::make_none()])
+                    PropertyValue::StructProperty(vec![Property::new_none()])
                 }
             }
             "ArrayProperty" => PropertyValue::ArrayProperty { values: Vec::new() },
@@ -897,6 +920,14 @@ pub struct PropertyBody {
 }
 
 impl PropertyBody {
+    pub fn new_scalar(value: PropertyValue) -> Self {
+        Self {
+            property_type: PropertyType::new_scalar(value.type_name()),
+            flags: 0,
+            value,
+        }
+    }
+
     pub fn size(&self) -> usize {
         self.property_type.size() + 4 + 1 + self.value.size()
     }
@@ -946,12 +977,16 @@ pub struct Property {
 }
 
 impl Property {
-    pub const fn is_none(&self) -> bool {
-        self.body.is_none()
+    pub fn new_scalar(name: &str, value: PropertyValue) -> Self {
+        Self { name: FString::from_str(name), body: Some(PropertyBody::new_scalar(value)) }
     }
 
-    pub fn make_none() -> Self {
+    pub fn new_none() -> Self {
         Self { name: FString::from_str("None"), body: None }
+    }
+
+    pub const fn is_none(&self) -> bool {
+        self.body.is_none()
     }
 
     pub fn custom_struct_footer_size(&self) -> Option<usize> {

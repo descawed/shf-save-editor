@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use binrw::BinReaderExt;
 use binrw::BinWriterExt;
 use eframe::egui;
-use egui::{KeyboardShortcut, Modifiers, Key, RichText, ViewportCommand};
+use egui::{KeyboardShortcut, Modifiers, Key, RichText, SliderClamping, ViewportCommand};
 
+use crate::game::*;
 use crate::save::*;
 use crate::uobject::Stringable;
 
@@ -145,7 +146,9 @@ impl AppState {
 
     fn typed_input<T: Stringable + ?Sized>(ui: &mut egui::Ui, label: &str, value: &mut T) {
         ui.horizontal(|ui| {
-            ui.label(format!("{label}: "));
+            if !label.is_empty() {
+                ui.label(format!("{label}: "));
+            }
             let mut string = value.to_string();
             if ui.text_edit_singleline(&mut string).changed() {
                 value.try_set_from_str(&string);
@@ -494,6 +497,205 @@ impl AppState {
         egui::CollapsingHeader::new("Save Game")
             .show(ui, |ui| self.show_save_game(ui));
     }
+
+    fn show_upgrade_level_selector(ui: &mut egui::Ui, player_stats: &mut impl Indexable, level_key: &str, buy_key: &str) {
+        ui.horizontal(|ui| {
+            let Some(current_level) = player_stats.get_key_mut(level_key) else {
+                ui.colored_label(egui::Color32::RED, "Missing upgrade level");
+                return;
+            };
+            ui.label("Upgrade level: ");
+
+            let mut selected_level = None;
+            for level in 0..=MAX_UPGRADE_LEVEL {
+                if ui.selectable_label(*current_level == level, level.to_string()).clicked() {
+                    selected_level = Some(level);
+                }
+            }
+
+            let Some(selected_level) = selected_level else {
+                return;
+            };
+
+            *current_level = PropertyValue::IntProperty(selected_level);
+            if let Some(buy_level) = player_stats.get_key_mut(buy_key) {
+                *buy_level = PropertyValue::IntProperty(selected_level);
+            }
+        });
+    }
+
+    fn show_stat_slider(ui: &mut egui::Ui, label: &str, stat_value: Option<&mut PropertyValue>) {
+        let Some(PropertyValue::FloatProperty(stat_value)) = stat_value else {
+            ui.colored_label(egui::Color32::RED, "Error: Missing or invalid stat value");
+            return;
+        };
+
+        // never clamp so the user can play around with unusual values if they want to
+        ui.add(egui::Slider::new(stat_value, 0.0..=1.0).text(label).clamping(SliderClamping::Never));
+    }
+
+    fn show_player_stats(ui: &mut egui::Ui, player_stats: &mut impl Indexable) {
+        ui.heading("Health");
+        Self::show_stat_slider(ui, "Ratio", player_stats.get_key_mut("HealthRatio"));
+        Self::show_upgrade_level_selector(ui, player_stats, "MaxHealthLevel", "BuyHealthLevel");
+        ui.separator();
+
+        ui.heading("Stamina");
+        Self::show_stat_slider(ui, "Ratio", player_stats.get_key_mut("StaminaRatio"));
+        Self::show_upgrade_level_selector(ui, player_stats, "MaxStaminaLevel", "BuyStaminaLevel");
+        ui.separator();
+
+        ui.heading("Sanity");
+        Self::show_stat_slider(ui, "Ratio", player_stats.get_key_mut("SanityRatio"));
+        Self::show_stat_slider(ui, "Current Max Ratio", player_stats.get_key_mut("CurrentMaxSanityRatio"));
+        Self::show_upgrade_level_selector(ui, player_stats, "MaxSanityLevel", "BuySanityLevel");
+        ui.separator();
+
+        let Some(PropertyValue::IntProperty(faith_value)) = player_stats.get_key_mut("FaithValue") else {
+            ui.colored_label(egui::Color32::RED, "Error: Missing faith value");
+            return;
+        };
+        ui.heading("Faith");
+        Self::typed_input(ui, "", faith_value);
+    }
+
+    fn show_weapons(ui: &mut egui::Ui, inventory: &mut impl Indexable, world: &str) {
+        ui.heading(format!("{world} Weapons"));
+
+        let equip_key = format!("{world}EquippedWeaponIndex");
+        let mut equip_index = match inventory.get_key(&equip_key) {
+            Some(PropertyValue::IntProperty(equip_index)) => *equip_index,
+            _ => -1,
+        };
+        let mut set_equip_index = false;
+
+        let Some(PropertyValue::ArrayProperty { values, .. }) = inventory.get_key_mut(&format!("{world}Weapons")) else {
+            ui.colored_label(egui::Color32::RED, "Error: missing or invalid weapons");
+            return;
+        };
+
+        let mut delete_index = None;
+        for (i, inventory_weapon) in values.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                let can_delete = i >= MIN_WEAPONS;
+                if ui.add_enabled(can_delete, egui::Button::new("🗑")).clicked() {
+                    delete_index = Some(i);
+                }
+
+                let max_durability = match inventory_weapon.get_key_mut("IDIndex") {
+                    Some(PropertyValue::IntProperty(id_index)) => {
+                        let weapon = get_weapon_from_id(*id_index);
+
+                        ui.label("Weapon");
+                        let dropdown = egui::ComboBox::from_id_salt(format!("{world} weapon {i}"));
+                        let dropdown = match weapon {
+                            Some(weapon) => dropdown.selected_text(weapon.name),
+                            None => dropdown.selected_text(format!("Unknown {}", *id_index)),
+                        };
+                        dropdown.show_ui(ui, |ui| {
+                            ui.selectable_value(id_index, NO_WEAPON.id_index, NO_WEAPON.name);
+                            for weapon in &WEAPONS {
+                                ui.selectable_value(id_index, weapon.id_index, weapon.name);
+                            }
+                        });
+
+                        // grab the weapon definition again in case it changed
+                        match get_weapon_from_id(*id_index) {
+                            Some(weapon) => weapon.max_durability,
+                            None => DEFAULT_MAX_WEAPON_DURABILITY,
+                        }
+                    }
+                    _ => {
+                        ui.colored_label(egui::Color32::RED, "Error: missing or invalid weapon ID index");
+                        DEFAULT_MAX_WEAPON_DURABILITY
+                    }
+                };
+
+                match inventory_weapon.get_key_mut("Durability") {
+                    Some(PropertyValue::FloatProperty(durability)) => {
+                        ui.label("Durability");
+                        ui.add(egui::Slider::new(durability, 0.0..=max_durability).clamping(SliderClamping::Never));
+                    }
+                    _ => {
+                        ui.colored_label(egui::Color32::RED, "Error: missing or invalid durability");
+                    }
+                }
+
+                let is_equipped = i as i32 == equip_index;
+                if ui.radio(is_equipped, "Equipped").clicked() {
+                    equip_index = i as i32;
+                    set_equip_index = true;
+                }
+            });
+        }
+
+        if let Some(index) = delete_index {
+            values.remove(index);
+        }
+
+        if values.len() < MAX_WEAPONS && ui.button("Add weapon").clicked() {
+            values.push(
+                PropertyValue::StructProperty(vec![
+                    Property::new_scalar("Durability", PropertyValue::FloatProperty(0.0)),
+                    Property::new_scalar("IDIndex", PropertyValue::IntProperty(NO_WEAPON.id_index)),
+                    Property::new_none(),
+                ])
+            );
+        }
+
+        // I *think* the equipped and target indexes are always set to the same value in practice, but I don't know for sure,
+        // so we shouldn't change things unless the user explicitly requested a change
+        if set_equip_index {
+            if let Some(PropertyValue::IntProperty(equip_index_value)) = inventory.get_key_mut(&equip_key) {
+                *equip_index_value = equip_index;
+            }
+            if let Some(PropertyValue::IntProperty(target_index_value)) = inventory.get_key_mut(&format!("{world}TargetWeaponIndex")) {
+                *target_index_value = equip_index;
+            }
+        }
+    }
+
+    fn show_inventory(ui: &mut egui::Ui, inventory: &mut impl Indexable) {
+        Self::show_weapons(ui, inventory, "Fog");
+        ui.separator();
+        Self::show_weapons(ui, inventory, "Dark");
+    }
+
+    fn show_simple_view(&mut self, ui: &mut egui::Ui) {
+        let Some(save) = &mut self.save else {
+            return;
+        };
+
+        let Some(player_state_record) = save.save_data.get_key_mut("PlayerStateRecord") else {
+            ui.colored_label(egui::Color32::RED, "Error: missing PlayerStateRecord");
+            return;
+        };
+
+        match player_state_record.get_key_mut("Data") {
+            Some(data) => Self::show_player_stats(ui, data),
+            None => {
+                ui.colored_label(egui::Color32::RED, "Error: missing Data property in PlayerStateRecord");
+            }
+        }
+
+        ui.separator();
+
+        let Some(PropertyValue::ArrayProperty { values, .. }) = player_state_record.get_key_mut("ComponentRecords") else {
+            ui.colored_label(egui::Color32::RED, "Error: missing or invalid ComponentRecords property in PlayerStateRecord");
+            return;
+        };
+
+        for component_record in values {
+            if let Some(class) = component_record.get_key_mut("Class") {
+                if class == PLAYER_INVENTORY_COMPONENT_CLASS && let Some(data) = component_record.get_key_mut("Data") {
+                    Self::show_inventory(ui, data);
+                    return;
+                }
+            }
+        }
+
+        ui.colored_label(egui::Color32::RED, "Error: missing inventory component record");
+    }
 }
 
 impl eframe::App for AppState {
@@ -569,7 +771,7 @@ impl eframe::App for AppState {
                             ui.separator();
 
                             match self.tab {
-                                AppTab::Simple => (),
+                                AppTab::Simple => self.show_simple_view(ui),
                                 AppTab::Advanced => self.show_advanced_view(ui),
                             }
                         });
