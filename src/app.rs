@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use binrw::BinReaderExt;
 use binrw::BinWriterExt;
 use eframe::egui;
-use egui::{RichText, ViewportCommand};
+use egui::{KeyboardShortcut, Modifiers, Key, RichText, ViewportCommand};
 
 use crate::save::*;
 use crate::uobject::Stringable;
@@ -498,11 +498,24 @@ impl AppState {
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let open_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
+        if ctx.input_mut(|i| i.consume_shortcut(&open_shortcut)) {
+            self.open_save();
+        }
+
+        let save_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
+        if ctx.input_mut(|i| i.consume_shortcut(&save_shortcut)) && self.save.is_some() {
+            self.save();
+        }
+
         // Menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Open .sav...").clicked() {
+                    if ui
+                        .add(egui::Button::new("Open .sav...").shortcut_text(ctx.format_shortcut(&open_shortcut)))
+                        .clicked()
+                    {
                         ui.close();
                         self.open_save();
                     }
@@ -511,7 +524,13 @@ impl eframe::App for AppState {
 
                     let can_save = self.save.is_some();
 
-                    if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
+                    if ui
+                        .add_enabled(
+                            can_save,
+                            egui::Button::new("Save").shortcut_text(ctx.format_shortcut(&save_shortcut)),
+                        )
+                        .clicked()
+                    {
                         ui.close();
                         self.save();
                     }
@@ -562,7 +581,10 @@ impl eframe::App for AppState {
                     ui.heading("Silent Hill f Save Editor");
                     ui.label("Open a .sav file to begin.");
                     ui.add_space(10.0);
-                    if ui.button("Open .sav...").clicked() {
+                    if ui
+                        .add(egui::Button::new("Open .sav...").shortcut_text(ctx.format_shortcut(&open_shortcut)))
+                        .clicked()
+                    {
                         self.open_save();
                     }
                 });
