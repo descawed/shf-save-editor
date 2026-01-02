@@ -454,16 +454,51 @@ impl AppState {
         Self::show_property_value(ui, "Value", &mut property.value, Some(&mut property.flags), &property.property_type);
     }
 
+    fn show_type_menu(ui: &mut egui::Ui, selected_type: &mut Option<&'static str>) -> bool {
+        let mut selected = false;
+        for type_name in &SCALAR_TYPE_NAMES {
+            if ui.button(*type_name).clicked() {
+                *selected_type = Some(*type_name);
+                ui.close();
+                selected = true;
+            }
+        }
+
+        selected
+    }
+
     fn show_properties(ui: &mut egui::Ui, label: &str, properties: &mut Vec<Property>) {
         let num_properties = properties.len();
         egui::CollapsingHeader::new(format!("{label} ({num_properties})"))
             .show(ui, |ui| {
-                let mut delete_index = None;
+                let mut action = ListAction::None;
+                let mut selected_type = None;
                 for (i, property) in properties.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(!property.is_none(), egui::Button::new("🗑")).clicked() {
-                            delete_index = Some(i);
-                        }
+                        ui.menu_button("☰", |ui| {
+                            ui.menu_button("Insert above", |ui| {
+                                if Self::show_type_menu(ui, &mut selected_type) {
+                                    action = ListAction::Insert(i);
+                                }
+                            });
+
+                            ui.menu_button("Insert below", |ui| {
+                                if Self::show_type_menu(ui, &mut selected_type) {
+                                    action = ListAction::Insert(i + 1);
+                                }
+                            });
+
+                            if action != ListAction::None && selected_type.is_some() {
+                                ui.close();
+                            }
+
+                            ui.separator();
+
+                            if ui.add_enabled(!property.is_none(), egui::Button::new("Delete")).clicked() {
+                                action = ListAction::Delete(i);
+                                ui.close();
+                            }
+                        });
                         egui::CollapsingHeader::new(format!("{}: {}", i, property.name))
                             .show(ui, |ui| {
                                 Self::show_property(ui, property);
@@ -471,8 +506,15 @@ impl AppState {
                     });
                 }
 
-                if let Some(index) = delete_index {
-                    properties.remove(index);
+                match action {
+                    ListAction::Insert(index) => {
+                        let Some(selected_type) = selected_type else { return; };
+                        properties.insert(index, Property::new_scalar(&format!("Field{index}"), PropertyValue::default_for_type(selected_type)));
+                    }
+                    ListAction::Delete(index) => {
+                        properties.remove(index);
+                    },
+                    ListAction::None => (),
                 }
             });
     }
