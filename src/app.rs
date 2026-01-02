@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use binrw::BinReaderExt;
 use binrw::BinWriterExt;
-use eframe::egui;
+use eframe::{egui, Storage};
 use egui::{KeyboardShortcut, Modifiers, Key, RichText, SliderClamping, ViewportCommand};
 
 use crate::game::*;
@@ -12,6 +12,26 @@ use crate::save::*;
 use crate::uobject::Stringable;
 
 const BINARY_DATA_CUTOFF: usize = 10;
+
+const MIN_UI_SCALE: f32 = 0.5;
+const MAX_UI_SCALE: f32 = 2.0;
+
+const SETTINGS_KEY: &str = "shf_settings";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Settings {
+    default_pixels_per_point: Option<f32>,
+    ui_scale: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            default_pixels_per_point: None,
+            ui_scale: 1.0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListAction {
@@ -59,15 +79,42 @@ impl Default for AppTab {
     }
 }
 
-#[derive(Default)]
 pub struct AppState {
     save_path: Option<PathBuf>,
     save: Option<SaveGame>,
     error_message: Option<String>,
     tab: AppTab,
+    default_pixels_per_point: Option<f32>,
+    ui_scale: f32,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            save_path: None,
+            save: None,
+            error_message: None,
+            tab: AppTab::default(),
+            default_pixels_per_point: None,
+            ui_scale: 1.0,
+        }
+    }
 }
 
 impl AppState {
+    pub fn load_app(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = Self::default();
+
+        if let Some(storage) = cc.storage {
+            if let Some(settings) = eframe::get_value::<Settings>(storage, SETTINGS_KEY) {
+                app.default_pixels_per_point = settings.default_pixels_per_point;
+                app.ui_scale = settings.ui_scale;
+            }
+        }
+
+        app
+    }
+
     fn error_modal(&mut self, ctx: &egui::Context) {
         let Some(ref error_message) = self.error_message else {
             return;
@@ -984,6 +1031,10 @@ impl AppState {
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.default_pixels_per_point.is_none() {
+            self.default_pixels_per_point = Some(ctx.pixels_per_point());
+        }
+
         let open_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
         if ctx.input_mut(|i| i.consume_shortcut(&open_shortcut)) {
             self.open_save();
@@ -999,7 +1050,7 @@ impl eframe::App for AppState {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui
-                        .add(egui::Button::new("Open .sav...").shortcut_text(ctx.format_shortcut(&open_shortcut)))
+                        .add(egui::Button::new("Open...").shortcut_text(ctx.format_shortcut(&open_shortcut)))
                         .clicked()
                     {
                         ui.close();
@@ -1036,6 +1087,12 @@ impl eframe::App for AppState {
                     }
                 });
             });
+        });
+
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            if ui.add(egui::Slider::new(&mut self.ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE).text("UI Scale")).changed() {
+                ctx.set_pixels_per_point(self.ui_scale * self.default_pixels_per_point.unwrap());
+            }
         });
 
         if self.save.is_some() {
@@ -1077,5 +1134,13 @@ impl eframe::App for AppState {
         }
 
         self.error_modal(ctx);
+    }
+
+    fn save(&mut self, storage: &mut dyn Storage) {
+        let settings = Settings {
+            default_pixels_per_point: self.default_pixels_per_point,
+            ui_scale: self.ui_scale,
+        };
+        eframe::set_value(storage, SETTINGS_KEY, &settings);
     }
 }
