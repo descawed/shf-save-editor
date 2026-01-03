@@ -135,7 +135,7 @@ impl AppState {
         }
     }
 
-    fn load_save(&mut self, save_path: PathBuf) -> anyhow::Result<()> {
+    fn load_save(&mut self, save_path: PathBuf) -> Result<()> {
         let mut file = File::open(&save_path)?;
         let save: SaveGame = file.read_le()?;
         self.save_path = Some(save_path);
@@ -160,7 +160,7 @@ impl AppState {
             return;
         };
 
-        let result: anyhow::Result<()> = (|| {
+        let result: Result<()> = (|| {
             let mut file = File::create(&path)?;
             file.write_le(save)?;
             Ok(())
@@ -193,7 +193,7 @@ impl AppState {
         }
     }
 
-    fn typed_input<T: Stringable + ?Sized>(ui: &mut egui::Ui, label: &str, value: &mut T) {
+    fn typed_input<T: Stringable + ?Sized>(ui: &mut egui::Ui, label: &str, value: &mut T) -> bool {
         ui.horizontal(|ui| {
             if !label.is_empty() {
                 ui.label(format!("{label}: "));
@@ -201,8 +201,11 @@ impl AppState {
             let mut string = value.to_string();
             if ui.text_edit_singleline(&mut string).changed() {
                 value.try_set_from_str(&string);
+                true
+            } else {
+                false
             }
-        });
+        }).inner
     }
 
     fn text_input(ui: &mut egui::Ui, label: &str, value: &mut FString) {
@@ -592,11 +595,11 @@ impl AppState {
             .show(ui, |ui| self.show_save_game(ui));
     }
 
-    fn show_upgrade_level_selector(ui: &mut egui::Ui, player_stats: &mut impl Indexable, level_key: &str, buy_key: &str) {
+    fn show_upgrade_level_selector(ui: &mut egui::Ui, player_stats: &mut impl Indexable, level_key: &str, buy_key: &str) -> (bool, i32) {
         ui.horizontal(|ui| {
             let Some(current_level) = player_stats.get_key_mut(level_key) else {
                 ui.colored_label(egui::Color32::RED, "Missing upgrade level");
-                return;
+                return (false, 0);
             };
             ui.label("Upgrade level: ");
 
@@ -608,30 +611,45 @@ impl AppState {
             }
 
             let Some(selected_level) = selected_level else {
-                return;
+                return (false, match current_level {
+                    PropertyValue::IntProperty(level) => *level,
+                    _ => 0,
+                });
             };
 
             *current_level = PropertyValue::IntProperty(selected_level);
             if let Some(buy_level) = player_stats.get_key_mut(buy_key) {
                 *buy_level = PropertyValue::IntProperty(selected_level);
             }
-        });
+
+            (true, selected_level)
+        }).inner
     }
 
-    fn show_stat_slider(ui: &mut egui::Ui, label: &str, stat_value: Option<&mut PropertyValue>) {
+    fn show_stat_slider(ui: &mut egui::Ui, label: &str, stat_value: Option<&mut PropertyValue>) -> (bool, f32) {
         let Some(PropertyValue::FloatProperty(stat_value)) = stat_value else {
             ui.colored_label(egui::Color32::RED, "Error: Missing or invalid stat value");
-            return;
+            return (false, 0.0);
         };
 
         // never clamp so the user can play around with unusual values if they want to
-        ui.add(egui::Slider::new(stat_value, 0.0..=1.0).text(label).clamping(SliderClamping::Never));
+        let response = ui.add(egui::Slider::new(stat_value, 0.0..=1.0).text(label).clamping(SliderClamping::Never));
+        (response.changed(), *stat_value)
     }
 
-    fn show_player_stats(ui: &mut egui::Ui, player_stats: &mut impl Indexable) {
+    fn show_player_stats(ui: &mut egui::Ui, player_stats: &mut impl Indexable, health: &mut f32) {
         ui.heading("Health");
-        Self::show_stat_slider(ui, "Ratio", player_stats.get_key_mut("HealthRatio"));
-        Self::show_upgrade_level_selector(ui, player_stats, "MaxHealthLevel", "BuyHealthLevel");
+
+        let health_changed = Self::typed_input(ui, "Current", health);
+        let (ratio_changed, ratio) = Self::show_stat_slider(ui, "Ratio", player_stats.get_key_mut("HealthRatio"));
+        let (upgrade_level_changed, upgrade_level) = Self::show_upgrade_level_selector(ui, player_stats, "MaxHealthLevel", "BuyHealthLevel");
+
+        if health_changed && let Some(PropertyValue::FloatProperty(health_ratio)) = player_stats.get_key_mut("HealthRatio") {
+            *health_ratio = *health / (BASE_HEALTH + upgrade_level as f32 * HEALTH_PER_UPGRADE);
+        } else if ratio_changed || upgrade_level_changed {
+            *health = ratio * (BASE_HEALTH + upgrade_level as f32 * HEALTH_PER_UPGRADE);
+        }
+
         ui.separator();
 
         ui.heading("Stamina");
@@ -1050,7 +1068,7 @@ impl AppState {
         ui.heading("Difficulty");
 
         Self::show_difficulty::<ActionLevel>(ui, "Action", save, "ActionLevel")?;
-        Self::show_difficulty::<RiddleLevel>(ui, "Puzzle", save, "RiddleLevel")
+        Self::show_difficulty::<RiddleLevel>(ui, "Puzzles", save, "RiddleLevel")
     }
 
     fn show_simple_view(&mut self, ui: &mut egui::Ui) {
@@ -1063,13 +1081,18 @@ impl AppState {
         }
         ui.separator();
 
+        let mut health = match prop!(&save.save_data, ["HinakoRecord"]["Health"]) {
+            Some(PropertyValue::FloatProperty(health)) => *health,
+            _ => 0.0,
+        };
+
         let Some(player_state_record) = save.save_data.get_key_mut("PlayerStateRecord") else {
             ui.colored_label(egui::Color32::RED, "Error: missing PlayerStateRecord");
             return;
         };
 
         match player_state_record.get_key_mut("Data") {
-            Some(data) => Self::show_player_stats(ui, data),
+            Some(data) => Self::show_player_stats(ui, data, &mut health),
             None => {
                 ui.colored_label(egui::Color32::RED, "Error: missing Data property in PlayerStateRecord");
             }
@@ -1082,16 +1105,25 @@ impl AppState {
             return;
         };
 
+        let mut found_inventory = false;
         for component_record in values {
             if let Some(class) = component_record.get_key_mut("Class") {
                 if class == PLAYER_INVENTORY_COMPONENT_CLASS && let Some(data) = component_record.get_key_mut("Data") {
                     Self::show_inventory(ui, data);
-                    return;
+                    found_inventory = true;
+                    break;
                 }
             }
         }
 
-        ui.colored_label(egui::Color32::RED, "Error: missing inventory component record");
+        if !found_inventory {
+            ui.colored_label(egui::Color32::RED, "Error: missing inventory component record");
+        }
+
+        // if the health was updated above, save it
+        if let Some(PropertyValue::FloatProperty(health_property)) = prop_mut!(&mut save.save_data, ["HinakoRecord"]["Health"]) {
+            *health_property = health;
+        }
     }
 }
 

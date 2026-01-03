@@ -58,6 +58,66 @@ pub trait Indexable {
     fn get_index_mut(&mut self, index: usize) -> Option<&mut PropertyValue>;
 }
 
+/// A type that can be used to index into a save object
+pub trait PropertyIndex {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue>;
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue>;
+}
+
+impl PropertyIndex for &str {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
+        indexable.get_key(self)
+    }
+
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
+        indexable.get_key_mut(self)
+    }
+}
+
+impl PropertyIndex for usize {
+    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
+        indexable.get_index(*self)
+    }
+
+    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
+        indexable.get_index_mut(*self)
+    }
+}
+
+macro_rules! prop {
+    // first index is treated specially because we're not necessarily dealing with a PropertyValue
+    // at that point
+    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
+        let mut cur = $idx1.get_from($obj);
+        $(
+            cur = match cur {
+                Some(p) => $idx.get_from(p),
+                None => None,
+            };
+        )*
+        cur
+    }};
+}
+
+pub(crate) use prop;
+
+macro_rules! prop_mut {
+    // first index is treated specially because we're not necessarily dealing with a PropertyValue
+    // at that point
+    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
+        let mut cur = $idx1.get_from_mut($obj);
+        $(
+            cur = match cur {
+                Some(p) => $idx.get_from_mut(p),
+                None => None,
+            };
+        )*
+        cur
+    }};
+}
+
+pub(crate) use prop_mut;
+
 /// A 16-byte GUID
 #[binrw]
 #[derive(Debug, Clone)]
