@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::path::PathBuf;
 
+use anyhow::Result;
 use binrw::BinReaderExt;
 use binrw::BinWriterExt;
 use eframe::{egui, Storage};
@@ -968,7 +969,7 @@ impl AppState {
                     values.remove(index);
                 }
 
-                if values.len() < MAX_OMAMORI_SLOTS && ui.button("Add omamori").clicked() {
+                if values.len() < MAX_OMAMORI_SLOTS && ui.button("Add omamori slot").clicked() {
                     values.push(PropertyValue::IntProperty(-1));
                 }
             }
@@ -992,10 +993,75 @@ impl AppState {
         Self::show_letters(ui, inventory);
     }
 
+    fn show_difficulty<T: DifficultyLevel>(ui: &mut egui::Ui, name: &str, save: &mut impl Indexable, property_name: &str) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label(name);
+
+            let level_property = save.get_key_mut(property_name);
+            let mut selected_level = match level_property {
+                Some(PropertyValue::EnumProperty(level)) => {
+                    let level = level.as_str();
+                    match T::from_str(level) {
+                        Ok(level) => level,
+                        Err(_) => {
+                            ui.colored_label(egui::Color32::RED, format!("Error: invalid difficulty level {level}"));
+                            return Ok(());
+                        }
+                    }
+                }
+                Some(_) => {
+                    ui.colored_label(egui::Color32::RED, "Error: invalid difficulty level type");
+                    return Ok(());
+                }
+                _ => T::default(),
+            };
+
+            egui::ComboBox::from_id_salt(name)
+                .selected_text(selected_level.name())
+                .show_ui(ui, |ui| {
+                    for level in T::all() {
+                        ui.selectable_value(&mut selected_level, *level, level.name());
+                    }
+                });
+
+            match level_property {
+                Some(PropertyValue::EnumProperty(level)) => {
+                    let level = level.as_mut();
+                    level.clear();
+                    level.push_str(selected_level.as_str());
+                }
+                // at this point we know level_property, if present, is a valid EnumProperty, otherwise
+                // we would have bailed above
+                Some(_) => unreachable!(),
+                None if selected_level != T::default() => {
+                    save.add_property(
+                        Property::new_enum(property_name, T::namespace(), T::type_name(), selected_level.as_str())
+                    )?;
+                }
+                // we don't need to do anything if the level is the default value
+                None => (),
+            }
+
+            Ok(())
+        }).inner
+    }
+
+    fn show_difficulties(ui: &mut egui::Ui, save: &mut impl Indexable) -> Result<()> {
+        ui.heading("Difficulty");
+
+        Self::show_difficulty::<ActionLevel>(ui, "Action", save, "ActionLevel")?;
+        Self::show_difficulty::<RiddleLevel>(ui, "Puzzle", save, "RiddleLevel")
+    }
+
     fn show_simple_view(&mut self, ui: &mut egui::Ui) {
         let Some(save) = &mut self.save else {
             return;
         };
+
+        if let Err(e) = Self::show_difficulties(ui, &mut save.save_data) {
+            self.error_message = Some(format!("Failed to set difficulty: {e}"));
+        }
+        ui.separator();
 
         let Some(player_state_record) = save.save_data.get_key_mut("PlayerStateRecord") else {
             ui.colored_label(egui::Color32::RED, "Error: missing PlayerStateRecord");

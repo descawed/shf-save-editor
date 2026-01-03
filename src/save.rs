@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::io::{Cursor, ErrorKind, Read, Seek, SeekFrom};
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use binrw::{binrw, binwrite, BinRead, BinReaderExt, BinResult, BinWrite, Endian, NullString};
 use bitflags::bitflags;
 
@@ -46,6 +46,8 @@ const CORE_UOBJECT_TYPE_PREFIX: &str = "StructProperty</Script/CoreUObject.";
 
 /// A save object containing other objects which can be accessed by name or numeric index
 pub trait Indexable {
+    /// Adds a property to the object.
+    fn add_property(&mut self, property: Property) -> Result<()>;
     /// Gets the property with the given name or value for the given key, depending on the type.
     fn get_key(&self, key: &str) -> Option<&PropertyValue>;
     /// Gets a mutable reference to the property with the given name or value for the given key, depending on the type.
@@ -479,6 +481,22 @@ impl PropertyValue {
 }
 
 impl Indexable for PropertyValue {
+    fn add_property(&mut self, property: Property) -> Result<()> {
+        match self {
+            Self::StructProperty(properties) => {
+                // if we have a None property at the end of our property list, which we should, then we
+                // should insert the new property before it
+                if !property.is_none() && properties.last().map(Property::is_none).unwrap_or(false) {
+                    properties.insert(properties.len() - 1, property);
+                } else {
+                    properties.push(property);
+                }
+                Ok(())
+            }
+            _ => Err(anyhow!("Cannot add property to non-struct property")),
+        }
+    }
+    
     fn get_key(&self, key: &str) -> Option<&Self> {
         match self {
             Self::StructProperty(props) => props.iter().find_map(|p| if p.name == key {
@@ -740,6 +758,11 @@ pub struct TypeTag {
 }
 
 impl TypeTag {
+    /// Creates a new type tag with the given kind and value
+    pub fn new(kind: u32, value: &str) -> Self {
+        Self { kind, value: FString::from_str(value) }
+    }
+
     /// Returns the size of the type tag in bytes
     pub const fn size(&self) -> usize {
         4 + self.value.byte_size()
@@ -813,6 +836,15 @@ impl PropertyType {
     /// Creates a new PropertyType with the given scalar type name
     pub fn new_scalar(name: &str) -> Self {
         Self { name: FString::from_str(name), tags: Vec::new(), inner_types: Vec::new() }
+    }
+
+    /// Creates a new enum PropertyType with the given namespace and enum name
+    pub fn new_enum(namespace: &str, enum_name: &str) -> Self {
+        Self {
+            name: FString::from_str("EnumProperty"),
+            tags: vec![TypeTag::new(2, enum_name), TypeTag::new(1, namespace)],
+            inner_types: vec![Self::new_scalar("ByteProperty")],
+        }
     }
 
     fn describe_by_name(desc: &mut String, name: &str, tags: &[TypeTag], inner_types: &[Self]) {
@@ -936,12 +968,21 @@ pub struct PropertyBody {
 }
 
 impl PropertyBody {
-    /// Creates a new PropertyBody containg the given scalar PropertyValue
+    /// Creates a new PropertyBody containing the given scalar PropertyValue
     pub fn new_scalar(value: PropertyValue) -> Self {
         Self {
             property_type: PropertyType::new_scalar(value.type_name()),
             flags: 0,
             value,
+        }
+    }
+
+    /// Creates a new PropertyBody containing the given enum PropertyValue
+    pub fn new_enum(namespace: &str, enum_name: &str, value: &str) -> Self {
+        Self {
+            property_type: PropertyType::new_enum(namespace, enum_name),
+            flags: 0,
+            value: PropertyValue::EnumProperty(FString::from_str(value)),
         }
     }
 
@@ -969,6 +1010,10 @@ impl PropertyBody {
 }
 
 impl Indexable for PropertyBody {
+    fn add_property(&mut self, property: Property) -> Result<()> {
+        self.value.add_property(property)
+    }
+    
     fn get_key(&self, name: &str) -> Option<&PropertyValue> {
         self.value.get_key(name)
     }
@@ -996,6 +1041,14 @@ pub struct Property {
 }
 
 impl Property {
+    /// Creates a new enum property with the given name and value
+    pub fn new_enum(name: &str, namespace: &str, enum_name: &str, value: &str) -> Self {
+        Self {
+            name: FString::from_str(name),
+            body: Some(PropertyBody::new_enum(namespace, enum_name, value)),
+        }
+    }
+
     /// Creates a new property with the given name and scalar value
     pub fn new_scalar(name: &str, value: PropertyValue) -> Self {
         Self { name: FString::from_str(name), body: Some(PropertyBody::new_scalar(value)) }
@@ -1044,6 +1097,14 @@ impl Property {
 }
 
 impl Indexable for Property {
+    fn add_property(&mut self, property: Property) -> Result<()> {
+        if let Some(body) = self.body.as_mut() {
+            body.add_property(property)
+        } else {
+            Err(anyhow!("Cannot add property to non-struct property"))
+        }
+    }
+    
     fn get_key(&self, name: &str) -> Option<&PropertyValue> {
         self.body.as_ref().and_then(|b| b.get_key(name))
     }
@@ -1073,6 +1134,17 @@ pub struct SaveGameData {
 }
 
 impl Indexable for SaveGameData {
+    fn add_property(&mut self, property: Property) -> Result<()> {
+        // if we have a None property at the end of our property list, which we should, then we
+        // should insert the new property before it
+        if !property.is_none() && self.properties.last().map(Property::is_none).unwrap_or(false) {
+            self.properties.insert(self.properties.len() - 1, property);
+        } else {
+            self.properties.push(property);
+        }
+        Ok(())
+    }
+    
     fn get_key(&self, name: &str) -> Option<&PropertyValue> {
         self.properties.iter().find_map(|p| if p.name == name {
             p.body.as_ref().map(|b| &b.value)
