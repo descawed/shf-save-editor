@@ -1,3 +1,131 @@
+use std::str::FromStr;
+
+pub trait DifficultyLevel: Default + PartialEq + Copy + FromStr + 'static {
+    fn all() -> &'static [Self];
+
+    fn namespace() -> &'static str;
+
+    fn type_name() -> &'static str;
+
+    fn name(&self) -> &'static str;
+
+    fn as_str(&self) -> &'static str;
+}
+
+/// The selected action difficulty level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActionLevel {
+    Casual,
+    #[default]
+    Easy,
+    Normal,
+    Hard,
+}
+
+impl DifficultyLevel for ActionLevel {
+    fn all() -> &'static [Self] {
+        &[Self::Casual, Self::Easy, Self::Normal, Self::Hard]
+    }
+
+    fn namespace() -> &'static str {
+        "/Script/GameNoce"
+    }
+
+    fn type_name() -> &'static str {
+        "ENoceActionLevel"
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Casual => "Casual",
+            Self::Easy => "Story",
+            Self::Normal => "Hard",
+            Self::Hard => "Lost in the Fog",
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Casual => "ENoceActionLevel::Casual",
+            Self::Easy => "ENoceActionLevel::Easy",
+            Self::Normal => "ENoceActionLevel::Normal",
+            Self::Hard => "ENoceActionLevel::Hard",
+        }
+    }
+}
+
+impl FromStr for ActionLevel {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ENoceActionLevel::Casual" => Ok(Self::Casual),
+            "ENoceActionLevel::Easy" => Ok(Self::Easy),
+            "ENoceActionLevel::Normal" => Ok(Self::Normal),
+            "ENoceActionLevel::Hard" => Ok(Self::Hard),
+            _ => Err("invalid action level"),
+        }
+    }
+}
+
+/// The selected puzzle difficulty level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RiddleLevel {
+    #[default]
+    Easy,
+    Normal,
+    Hard,
+}
+
+impl DifficultyLevel for RiddleLevel {
+    fn all() -> &'static [Self] {
+        &[Self::Easy, Self::Normal, Self::Hard]
+    }
+
+    fn namespace() -> &'static str {
+        "/Script/GameNoce"
+    }
+
+    fn type_name() -> &'static str {
+        "ENoceRiddleLevel"
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Easy => "Story",
+            Self::Normal => "Hard",
+            Self::Hard => "Lost in the Fog",
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Easy => "ENoceRiddleLevel::Easy",
+            Self::Normal => "ENoceRiddleLevel::Normal",
+            Self::Hard => "ENoceRiddleLevel::Hard",
+        }
+    }
+}
+
+impl FromStr for RiddleLevel {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ENoceRiddleLevel::Easy" => Ok(Self::Easy),
+            "ENoceRiddleLevel::Normal" => Ok(Self::Normal),
+            "ENoceRiddleLevel::Hard" => Ok(Self::Hard),
+            _ => Err("invalid riddle level"),
+        }
+    }
+}
+
+/// The player's starting health.
+pub const BASE_HEALTH: f32 = 700.0;
+
+/// The amount by which maximum health increases with each upgrade.
+pub const HEALTH_PER_UPGRADE: f32 = 100.0;
+
 /// The maximum level to which the player's basic stats (health, stamina, and sanity) can be upgraded.
 pub const MAX_UPGRADE_LEVEL: i32 = 6;
 
