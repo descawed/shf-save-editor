@@ -46,72 +46,17 @@ const CORE_UOBJECT_TYPE_PREFIX: &str = "StructProperty</Script/CoreUObject.";
 
 /// A save object containing other objects which can be accessed by name or numeric index
 pub trait Indexable {
+    /// Gets the property with the given name or value for the given key, depending on the type.
     fn get_key(&self, key: &str) -> Option<&PropertyValue>;
+    /// Gets a mutable reference to the property with the given name or value for the given key, depending on the type.
     fn get_key_mut(&mut self, key: &str) -> Option<&mut PropertyValue>;
+    /// Gets the value at the given index if it exists.
     fn get_index(&self, index: usize) -> Option<&PropertyValue>;
+    /// Gets a mutable reference to the value at the given index if it exists.
     fn get_index_mut(&mut self, index: usize) -> Option<&mut PropertyValue>;
 }
 
-/// A type that can be used to index into a save object
-pub trait PropertyIndex {
-    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue>;
-    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue>;
-}
-
-impl PropertyIndex for &str {
-    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
-        indexable.get_key(self)
-    }
-
-    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
-        indexable.get_key_mut(self)
-    }
-}
-
-impl PropertyIndex for usize {
-    fn get_from<'a, I: Indexable>(&self, indexable: &'a I) -> Option<&'a PropertyValue> {
-        indexable.get_index(*self)
-    }
-
-    fn get_from_mut<'a, I: Indexable>(&self, indexable: &'a mut I) -> Option<&'a mut PropertyValue> {
-        indexable.get_index_mut(*self)
-    }
-}
-
-macro_rules! prop {
-    // first index is treated specially because we're not necessarily dealing with a PropertyValue
-    // at that point
-    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
-        let mut cur = $idx1.get_from($obj);
-        $(
-            cur = match cur {
-                Some(p) => $idx.get_from(p),
-                None => None,
-            };
-        )*
-        cur
-    }};
-}
-
-pub(crate) use prop;
-
-macro_rules! prop_mut {
-    // first index is treated specially because we're not necessarily dealing with a PropertyValue
-    // at that point
-    ($obj:expr, [$idx1:expr] $( [$idx:expr] )* ) => {{
-        let mut cur = $idx1.get_from_mut($obj);
-        $(
-            cur = match cur {
-                Some(p) => $idx.get_from_mut(p),
-                None => None,
-            };
-        )*
-        cur
-    }};
-}
-
-pub(crate) use prop_mut;
-
+/// A 16-byte GUID
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct Guid([u8; 16]);
@@ -154,6 +99,7 @@ impl FromStr for Guid {
     }
 }
 
+/// An Unreal Engine 5 string
 #[binrw]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FString {
@@ -165,29 +111,33 @@ pub struct FString {
 }
 
 impl FString {
+    /// Creates a new, empty FString.
     pub const fn new() -> Self {
         Self { string: String::new() }
     }
 
+    /// Creates a new FString from a string slice.
     pub fn from_str(s: &str) -> Self {
         Self { string: s.to_string() }
     }
 
+    /// Returns a reference to the string's contents.
     pub const fn as_str(&self) -> &str {
         self.string.as_str()
     }
 
+    /// Returns the length of the string in bytes.
     pub const fn len(&self) -> usize {
         self.string.len()
     }
 
+    /// Returns the total size of the FString in bytes, including the length prefix and null terminator.
     pub const fn byte_size(&self) -> usize {
-        // FIXME: this assumes that the string only contains 8-bit characters, but we don't enforce
-        //  that for user input
         // +4 for length prefix, +1 for null terminator
         self.len() + 4 + 1
     }
 
+    /// Returns a mutable reference to the string's contents.
     pub const fn as_mut(&mut self) -> &mut String {
         &mut self.string
     }
@@ -233,13 +183,17 @@ impl From<&str> for FString {
     }
 }
 
+/// Specifies which version of a particular system was being used while saving
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct CustomFormatEntry {
+    /// A GUID identifying the system.
     pub guid: Guid,
+    /// The version of the system.
     pub value: i32,
 }
 
+/// List of system versions in use while saving
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct CustomFormatData {
@@ -250,6 +204,7 @@ pub struct CustomFormatData {
     pub entries: Vec<CustomFormatEntry>,
 }
 
+/// The Unreal Engine version in use while saving
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct EngineVersion {
@@ -260,6 +215,7 @@ pub struct EngineVersion {
     pub build_id: FString,
 }
 
+/// The header of a save game file
 #[binrw]
 #[derive(Debug, Clone)]
 #[brw(magic = b"GVAS")]
@@ -269,6 +225,7 @@ pub struct SaveGameHeader {
     pub engine_version: EngineVersion,
 }
 
+/// Metadata needed to parse a property value
 #[derive(Debug, Clone)]
 pub struct PropertyValueArgs<'a> {
     property_type: &'a PropertyType,
@@ -277,12 +234,13 @@ pub struct PropertyValueArgs<'a> {
 }
 
 impl<'a> PropertyValueArgs<'a> {
-    pub const fn new(property_type: &'a PropertyType, flags: u8, data_size: u32) -> Self {
+    const fn new(property_type: &'a PropertyType, flags: u8, data_size: u32) -> Self {
         Self { property_type, flags, data_size }
     }
 }
 
 bitflags! {
+    /// Flags indicating various properties of a TextProperty
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct TextFlags: u32 {
         const TRANSIENT = 0x00000001;
@@ -295,6 +253,7 @@ bitflags! {
     }
 }
 
+/// The value of a TextProperty
 #[binrw]
 #[derive(Debug, Clone)]
 pub enum TextData {
@@ -327,6 +286,7 @@ pub enum TextData {
 }
 
 impl TextData {
+    /// Returns the size of the TextData in bytes
     pub fn size(&self) -> usize {
         // +1 for magic
         1 + match self {
@@ -360,6 +320,7 @@ fn read_properties_with_footer(footer_size: u64) -> BinResult<Vec<Property>> {
     Ok(props)
 }
 
+/// A custom game type which is encoded as a byte array instead of a StructProperty
 #[binrw]
 #[derive(Debug)]
 #[br(import(extra_bytes: usize))]
@@ -377,11 +338,15 @@ pub struct CustomStruct {
 }
 
 impl CustomStruct {
+    /// Returns the size of the custom struct in bytes
     pub fn size(&self) -> usize {
         4 + 1 + self.properties.iter().map(Property::size).sum::<usize>() + self.extra.len()
     }
 }
 
+/// A list of names of property types considered scalar
+///
+/// This excludes types with complex initialization or which require other type information.
 pub const SCALAR_TYPE_NAMES: [&str; 8] = [
     "BoolProperty",
     "ByteProperty",
@@ -393,6 +358,7 @@ pub const SCALAR_TYPE_NAMES: [&str; 8] = [
     "NameProperty",
 ];
 
+/// The value of a UE5 property
 #[binwrite]
 #[derive(Debug)]
 pub enum PropertyValue {
@@ -428,6 +394,7 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// Creates a default PropertyValue for the given type name
     pub fn default_for_type(type_name: &str) -> Self {
         match type_name {
             "BoolProperty" => Self::BoolProperty(None),
@@ -452,6 +419,7 @@ impl PropertyValue {
         }
     }
 
+    /// Returns the size of the PropertyValue in bytes
     pub fn size(&self) -> usize {
         match self {
             Self::StrProperty(s) | Self::EnumProperty(s) | Self::NameProperty(s) | Self::ObjectProperty(s) => s.byte_size(),
@@ -469,6 +437,7 @@ impl PropertyValue {
         }
     }
 
+    /// Returns the number of values in this PropertyValue for property types that contain multiple values
     pub fn array_len(&self) -> Option<usize> {
         Some(match self {
             // custom structs are encoded as byte arrays
@@ -488,6 +457,7 @@ impl PropertyValue {
         })
     }
 
+    /// Returns the name of this PropertyValue's type
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::StrProperty(_) => "StrProperty",
@@ -752,13 +722,16 @@ impl BinRead for PropertyValue {
         let current = reader.stream_position()?;
         if current > end {
             // TODO: make this an error, not a panic
-            panic!("property value size mismatch: expected {} bytes, got {}", args.data_size, current);
+            panic!("property value size mismatch: expected {} bytes, got {}", args.data_size, current - start);
         }
 
         Ok(value)
     }
 }
 
+/// A string associated with a property type
+///
+/// Type tags typically encode the names and namespaces of inner or backing types
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct TypeTag {
@@ -767,6 +740,7 @@ pub struct TypeTag {
 }
 
 impl TypeTag {
+    /// Returns the size of the type tag in bytes
     pub const fn size(&self) -> usize {
         4 + self.value.byte_size()
     }
@@ -823,6 +797,7 @@ fn num_inner_types(name: &str, tags: &[TypeTag]) -> usize {
     }
 }
 
+/// A description of the type of a property
 #[binrw]
 #[derive(Debug, Clone)]
 pub struct PropertyType {
@@ -835,6 +810,7 @@ pub struct PropertyType {
 }
 
 impl PropertyType {
+    /// Creates a new PropertyType with the given scalar type name
     pub fn new_scalar(name: &str) -> Self {
         Self { name: FString::from_str(name), tags: Vec::new(), inner_types: Vec::new() }
     }
@@ -879,17 +855,20 @@ impl PropertyType {
         }
     }
 
+    /// Returns a string describing the type
     pub fn describe(&self) -> String {
         let mut desc = String::new();
         Self::describe_by_name(&mut desc, self.name.as_str(), &self.tags, &self.inner_types);
         desc
     }
 
+    /// Returns the size of the type description in bytes
     pub fn size(&self) -> usize {
         // +4 for the tag list terminator
         self.name.byte_size() + self.tags.iter().map(TypeTag::size).sum::<usize>() + 4 + self.inner_types.iter().map(PropertyType::size).sum::<usize>()
     }
 
+    /// Returns the type of the elements contained within this type if applicable, otherwise returns the type itself
     pub fn element_type(&self) -> Cow<'_, Self> {
         match self.name.as_str() {
             "ArrayProperty" | "MapProperty" if !self.tags.is_empty() => {
@@ -907,6 +886,7 @@ impl PropertyType {
         }
     }
 
+    /// Creates a default value of this based on the given flags
     pub fn make_default_value(&self, flags: u8) -> PropertyValue {
         match self.name.as_str() {
             "BoolProperty" => PropertyValue::BoolProperty(Some(false)),
@@ -943,6 +923,7 @@ impl PropertyType {
     }
 }
 
+/// The body of a property, containing the type and value
 #[binrw]
 #[derive(Debug)]
 pub struct PropertyBody {
@@ -955,6 +936,7 @@ pub struct PropertyBody {
 }
 
 impl PropertyBody {
+    /// Creates a new PropertyBody containg the given scalar PropertyValue
     pub fn new_scalar(value: PropertyValue) -> Self {
         Self {
             property_type: PropertyType::new_scalar(value.type_name()),
@@ -963,11 +945,12 @@ impl PropertyBody {
         }
     }
 
+    /// Returns the size of the property body in bytes
     pub fn size(&self) -> usize {
         self.property_type.size() + 4 + 1 + self.value.size()
     }
 
-    pub fn parse_custom_struct(&mut self, footer_size: usize) -> BinResult<()> {
+    fn parse_custom_struct(&mut self, footer_size: usize) -> BinResult<()> {
         let custom_struct: CustomStruct = {
             let PropertyValue::ArrayProperty { values } = &self.value else {
                 return Ok(());
@@ -1003,6 +986,7 @@ impl Indexable for PropertyBody {
     }
 }
 
+/// An Unreal Engine 5 property
 #[binrw]
 #[derive(Debug)]
 pub struct Property {
@@ -1012,19 +996,22 @@ pub struct Property {
 }
 
 impl Property {
+    /// Creates a new property with the given name and scalar value
     pub fn new_scalar(name: &str, value: PropertyValue) -> Self {
         Self { name: FString::from_str(name), body: Some(PropertyBody::new_scalar(value)) }
     }
 
+    /// Creates a new empty property representing the end of a list of properties
     pub fn new_none() -> Self {
         Self { name: FString::from_str("None"), body: None }
     }
 
+    /// Returns true if this property represents the end of a list of properties
     pub const fn is_none(&self) -> bool {
         self.body.is_none()
     }
 
-    pub fn custom_struct_footer_size(&self) -> Option<usize> {
+    fn custom_struct_footer_size(&self) -> Option<usize> {
         match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
             ("Class", Some(PropertyValue::ObjectProperty(s))) => {
                 CUSTOM_STRUCT_CLASSES.iter().find_map(|(class, footer_size)| (s == class).then_some(*footer_size))
@@ -1033,7 +1020,7 @@ impl Property {
         }
     }
 
-    pub fn is_custom_struct_data(&self) -> bool {
+    fn is_custom_struct_data(&self) -> bool {
         match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
             ("Data", Some(PropertyValue::ArrayProperty { values })) => {
                 values.len() == 1 && matches!(values.first(), Some(PropertyValue::UnknownProperty(_)))
@@ -1042,7 +1029,7 @@ impl Property {
         }
     }
 
-    pub fn parse_custom_struct_data(&mut self, footer_size: usize) -> BinResult<()> {
+    fn parse_custom_struct_data(&mut self, footer_size: usize) -> BinResult<()> {
         if self.is_custom_struct_data() {
             self.body.as_mut().unwrap().parse_custom_struct(footer_size)
         } else {
@@ -1050,6 +1037,7 @@ impl Property {
         }
     }
 
+    /// Returns the size of this property in bytes
     pub fn size(&self) -> usize {
         self.name.byte_size() + self.body.as_ref().map(PropertyBody::size).unwrap_or(0)
     }
@@ -1073,6 +1061,7 @@ impl Indexable for Property {
     }
 }
 
+/// The main body of the save game after the header and custom entries
 #[binrw]
 #[derive(Debug)]
 pub struct SaveGameData {
@@ -1109,6 +1098,7 @@ impl Indexable for SaveGameData {
     }
 }
 
+/// A Silent Hill f save game
 #[binrw]
 #[derive(Debug)]
 pub struct SaveGame {

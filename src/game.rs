@@ -1,14 +1,21 @@
+/// The maximum level to which the player's basic stats (health, stamina, and sanity) can be upgraded.
 pub const MAX_UPGRADE_LEVEL: i32 = 6;
 
+/// The class of the type that holds the player's inventory.
 pub const PLAYER_INVENTORY_COMPONENT_CLASS: &str = "/Script/GameNoce.NocePlayerInventoryComponent";
 
+/// A type of item the player can obtain.
 pub trait Item: Sized {
+    /// An item definition representing the absence of an item.
     fn none() -> &'static Self;
 
+    /// An array of all items of this type.
     fn all() -> &'static [Self];
 
+    /// The in-game ID number of this item.
     fn id_index(&self) -> i32;
 
+    /// The name of this item.
     fn name(&self) -> &'static str;
 }
 
@@ -27,14 +34,19 @@ const fn get_item_from_id<T: Item>(id: i32, no_item: &'static T, items: &'static
     }
 }
 
+/// A description of a weapon the player can use.
 #[derive(Debug, Clone)]
 pub struct Weapon {
+    /// The in-game ID number of the weapon.
     pub id_index: i32,
+    /// The name of the weapon.
     pub name: &'static str,
+    /// The maximum durability of the weapon.
     pub max_durability: f32,
 }
 
 impl Weapon {
+    /// Creates a new weapon with the given properties.
     pub const fn new(id_index: i32, name: &'static str, max_durability: f32) -> Self {
         Self { id_index, name, max_durability }
     }
@@ -58,8 +70,11 @@ impl Item for Weapon {
     }
 }
 
+/// The default maximum durability to use for weapons that don't have one defined.
 pub const DEFAULT_MAX_WEAPON_DURABILITY: f32 = 1000.0;
+/// An empty weapon slot.
 pub const NO_WEAPON: Weapon = Weapon::new(-1, "None", DEFAULT_MAX_WEAPON_DURABILITY);
+/// All the weapons defined in the game, excluding the "None" weapon.
 pub const WEAPONS: [Weapon; 15] = [
     Weapon::new(0, "Steel Pipe", 450.0),
     Weapon::new(1, "Kitchen Knife", 240.0),
@@ -78,21 +93,29 @@ pub const WEAPONS: [Weapon; 15] = [
     Weapon::new(14, "PP-8001", 800.0),
 ];
 
+/// Gets the weapon definition with the given ID if one exists.
 pub const fn get_weapon_from_id(id: i32) -> Option<&'static Weapon> {
     get_item_from_id(id, &NO_WEAPON, &WEAPONS)
 }
 
+/// The minimum number of weapon slots the player can have.
 pub const MIN_WEAPONS: usize = 3;
+/// The maximum number of weapon slots the player can have.
 pub const MAX_WEAPONS: usize = 5;
 
+/// A description of a consumable item the player can use.
 #[derive(Debug, Clone)]
 pub struct ConsumableItem {
+    /// The in-game ID number of the consumable item.
     pub id_index: i32,
+    /// The name of the consumable item.
     pub name: &'static str,
+    /// The maximum stack size of the consumable item.
     pub max_stack: i32,
 }
 
 impl ConsumableItem {
+    /// Creates a new consumable item with the given properties.
     pub const fn new(id_index: i32, name: &'static str, max_stack: i32) -> Self {
         Self { id_index, name, max_stack }
     }
@@ -116,8 +139,11 @@ impl Item for ConsumableItem {
     }
 }
 
+/// The default maximum stack size to use for consumable items that don't have one defined.
 pub const DEFAULT_MAX_CONSUMABLE_ITEM_STACK: i32 = 99;
+/// An empty consumable item slot.
 pub const NO_CONSUMABLE_ITEM: ConsumableItem = ConsumableItem::new(-1, "None", DEFAULT_MAX_CONSUMABLE_ITEM_STACK);
+/// All the consumable items defined in the game, excluding the "None" consumable item.
 pub const CONSUMABLE_ITEMS: [ConsumableItem; 16] = [
     ConsumableItem::new(0, "Red Capsules", 99),
     ConsumableItem::new(1, "Red Capsules (ending 1)", 99),
@@ -137,15 +163,21 @@ pub const CONSUMABLE_ITEMS: [ConsumableItem; 16] = [
     ConsumableItem::new(15, "Toolkit", 3),
 ];
 
+/// Gets the consumable item definition with the given ID if one exists.
 pub const fn get_consumable_item_from_id(id: i32) -> Option<&'static ConsumableItem> {
     get_item_from_id(id, &NO_CONSUMABLE_ITEM, &CONSUMABLE_ITEMS)
 }
 
+/// The minimum number of consumable item inventory slots the player can have.
 pub const MIN_CONSUMABLE_ITEMS: usize = 8;
+/// The maximum number of consumable item inventory slots the player can have.
 pub const MAX_CONSUMABLE_ITEMS: usize = 14;
 
+/// The minimum number of omamori equip slots the player can have.
 pub const MIN_OMAMORI_SLOTS: usize = 1;
+/// The maximum number of omamori equip slots the player can have.
 pub const MAX_OMAMORI_SLOTS: usize = 5;
+/// The name of every omamori in the order of their ID indexes.
 pub const OMAMORI_NAMES: [&str; 41] = [
     "Weasel",
     "Serpent",
@@ -190,6 +222,7 @@ pub const OMAMORI_NAMES: [&str; 41] = [
     "Peony",
 ];
 
+/// The name of every key item in the order of their ID indexes.
 pub const KEY_ITEM_NAMES: [&str; 88] = [
     "Capsule Case",
     "Hotei-sama Sitting Cross-legged",
@@ -281,6 +314,7 @@ pub const KEY_ITEM_NAMES: [&str; 88] = [
     "Ema [22]",
 ];
 
+/// The name of every letter in the order of their ID indexes.
 pub const LETTER_NAMES: [&str; 229] = [
     "Note from Shu",
     "Strict Mother's Letter [1]",
