@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, ErrorKind, Read, Seek, SeekFrom};
 use std::str::FromStr;
 
 use anyhow::anyhow;
@@ -690,8 +690,9 @@ impl BinRead for PropertyValue {
             }
             "MapProperty" => {
                 let key_type = args.property_type.element_type().into_owned();
-                // TODO: make this an error, not a panic
-                let value_type = args.property_type.inner_types.last().expect("MapProperty should have a value type").clone();
+                let Some(value_type) = args.property_type.inner_types.last().cloned() else {
+                    return Err(binrw::Error::Io(std::io::Error::new(ErrorKind::InvalidData, "MapProperty should have a value type")));
+                };
                 let flags = args.flags;
 
                 let removed_count = u32::read_options(reader, endian, ())?;
@@ -721,8 +722,7 @@ impl BinRead for PropertyValue {
 
         let current = reader.stream_position()?;
         if current > end {
-            // TODO: make this an error, not a panic
-            panic!("property value size mismatch: expected {} bytes, got {}", args.data_size, current - start);
+            return Err(binrw::Error::Io(std::io::Error::new(ErrorKind::InvalidData, format!("property value size mismatch: expected {} bytes, got {}", args.data_size, current - start))));
         }
 
         Ok(value)
