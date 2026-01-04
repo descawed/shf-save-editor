@@ -36,8 +36,9 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ListAction {
+    #[default]
     None,
     Delete(usize),
     Insert(usize),
@@ -51,14 +52,9 @@ impl ListAction {
     }
 }
 
-impl Default for ListAction {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AppTab {
+    #[default]
     Simple,
     Advanced,
 }
@@ -73,12 +69,6 @@ impl AppTab {
             Self::Simple => "Simple",
             Self::Advanced => "Advanced",
         }
-    }
-}
-
-impl Default for AppTab {
-    fn default() -> Self {
-        Self::Simple
     }
 }
 
@@ -110,13 +100,11 @@ impl AppState {
     pub fn load_app(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
 
-        if let Some(storage) = cc.storage {
-            if let Some(settings) = eframe::get_value::<Settings>(storage, SETTINGS_KEY) {
-                app.default_pixels_per_point = settings.default_pixels_per_point;
-                app.ui_scale = settings.ui_scale;
-                if let Some(last_directory) = settings.last_directory {
-                    app.last_directory = Some(last_directory);
-                }
+        if let Some(storage) = cc.storage && let Some(settings) = eframe::get_value::<Settings>(storage, SETTINGS_KEY) {
+            app.default_pixels_per_point = settings.default_pixels_per_point;
+            app.ui_scale = settings.ui_scale;
+            if let Some(last_directory) = settings.last_directory {
+                app.last_directory = Some(last_directory);
             }
         }
 
@@ -137,10 +125,8 @@ impl AppState {
         let mut subdirectories = Vec::new();
         if let Ok(entries) = path.read_dir() {
             for entry in entries.flatten() {
-                if let Ok(file_type) = entry.file_type() {
-                    if file_type.is_dir() {
-                        subdirectories.push(entry.path());
-                    }
+                if let Ok(file_type) = entry.file_type() && file_type.is_dir() {
+                    subdirectories.push(entry.path());
                 }
             }
         }
@@ -505,7 +491,7 @@ impl AppState {
                                     .default_open(true)
                                     .show(ui, |ui| {
                                         Self::show_property_value(ui, "Key", &mut value.0, None, &key_type);
-                                        Self::show_property_value(ui, "Value", &mut value.1, None, &value_type);
+                                        Self::show_property_value(ui, "Value", &mut value.1, None, value_type);
                                     });
                             });
                         }
@@ -1170,12 +1156,13 @@ impl AppState {
 
         let mut found_inventory = false;
         for component_record in values {
-            if let Some(class) = component_record.get_key_mut("Class") {
-                if class == PLAYER_INVENTORY_COMPONENT_CLASS && let Some(data) = component_record.get_key_mut("Data") {
-                    Self::show_inventory(ui, data);
-                    found_inventory = true;
-                    break;
-                }
+            if let Some(class) = component_record.get_key_mut("Class")
+                && class == PLAYER_INVENTORY_COMPONENT_CLASS
+                && let Some(data) = component_record.get_key_mut("Data")
+            {
+                Self::show_inventory(ui, data);
+                found_inventory = true;
+                break;
             }
         }
 

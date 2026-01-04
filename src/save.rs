@@ -10,7 +10,7 @@ use bitflags::bitflags;
 
 use crate::uobject::*;
 
-const CUSTOM_STRUCT_CLASSES: [(&'static str, usize); 27] = [
+const CUSTOM_STRUCT_CLASSES: [(&str, usize); 27] = [
     ("/Script/GameNoce.NocePlayerInventoryComponent", 8),
     // there are blueprint records inside this object that I don't know how to parse
     // "/Script/GameNoce.NoceInteractableBase",
@@ -916,22 +916,22 @@ impl PropertyType {
 
         match name {
             "StructProperty" | "EnumProperty" => {
-                desc.push_str("<");
+                desc.push('<');
                 if let Some(namespace) = tags.get(1) {
                     desc.push_str(namespace.value.as_str());
-                    desc.push_str(".");
+                    desc.push('.');
                 }
                 desc.push_str(tags.first().unwrap().value.as_str());
-                desc.push_str(">");
+                desc.push('>');
             }
             "ArrayProperty" => {
-                desc.push_str("[");
+                desc.push('[');
                 let inner_type = tags.first().unwrap().value.as_str();
                 Self::describe_by_name(desc, inner_type, &tags[1..], inner_types);
-                desc.push_str("]");
+                desc.push(']');
             }
             "MapProperty" if !inner_types.is_empty() => {
-                desc.push_str("<");
+                desc.push('<');
 
                 let key_type = tags.first().unwrap().value.as_str();
                 Self::describe_by_name(desc, key_type, &tags[1..], inner_types);
@@ -941,7 +941,7 @@ impl PropertyType {
                 let value_type = inner_types.last().unwrap();
                 Self::describe_by_name(desc, value_type.name.as_str(), &value_type.tags, &value_type.inner_types);
 
-                desc.push_str(">");
+                desc.push('>');
             }
             _ => (),
         }
