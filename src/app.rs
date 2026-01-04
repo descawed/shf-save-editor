@@ -1126,6 +1126,19 @@ impl AppState {
             return;
         };
 
+        if save.save_data.type_name == SYSTEM_SAVE_TYPE {
+            ui.label("The Simple view only supports gameplay saves, not system saves. Use the Advanced view to edit the system save.");
+            return;
+        }
+
+        if save.save_data.type_name != SAVE_GAME_TYPE {
+            let type_name = save.save_data.type_name.as_str();
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!("Warning: unrecognized save type {type_name}. Some information may be missing or incorrect. It may be safer to use the Advanced view instead."),
+            );
+        }
+
         if let Err(e) = Self::show_difficulties(ui, &mut save.save_data) {
             self.error_message = Some(format!("Failed to set difficulty: {e}"));
         }

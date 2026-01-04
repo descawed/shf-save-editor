@@ -1,14 +1,25 @@
 use std::str::FromStr;
 
+/// The name of the UE5 class that represents the player's save game.
+pub const SAVE_GAME_TYPE: &str = "/Script/GameNoce.NoceSaveGame";
+/// The name of the UE5 class that represents the system save.
+pub const SYSTEM_SAVE_TYPE: &str = "/Script/GameNoce.NoceSystemSaveGame";
+
+/// A difficulty level represented by a UE5 enum
 pub trait DifficultyLevel: Default + PartialEq + Copy + FromStr + 'static {
+    /// Returns a list of all supported difficulty levels.
     fn all() -> &'static [Self];
 
+    /// Returns the namespace of the UE5 enum type that represents this difficulty level.
     fn namespace() -> &'static str;
 
+    /// Returns the name of the UE5 enum type that represents this difficulty level.
     fn type_name() -> &'static str;
 
+    /// Returns the user-friendly name of this difficulty level.
     fn name(&self) -> &'static str;
 
+    /// Returns the string representation of the enum value for this difficulty level.
     fn as_str(&self) -> &'static str;
 }
 
