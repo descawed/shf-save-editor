@@ -23,6 +23,7 @@ const SETTINGS_KEY: &str = "shf_settings";
 struct Settings {
     default_pixels_per_point: Option<f32>,
     ui_scale: f32,
+    last_directory: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -30,6 +31,7 @@ impl Default for Settings {
         Self {
             default_pixels_per_point: None,
             ui_scale: 1.0,
+            last_directory: None,
         }
     }
 }
@@ -82,6 +84,7 @@ impl Default for AppTab {
 
 pub struct AppState {
     save_path: Option<PathBuf>,
+    last_directory: Option<PathBuf>,
     save: Option<SaveGame>,
     error_message: Option<String>,
     tab: AppTab,
@@ -93,6 +96,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             save_path: None,
+            last_directory: Self::get_default_save_directory(),
             save: None,
             error_message: None,
             tab: AppTab::default(),
@@ -110,10 +114,42 @@ impl AppState {
             if let Some(settings) = eframe::get_value::<Settings>(storage, SETTINGS_KEY) {
                 app.default_pixels_per_point = settings.default_pixels_per_point;
                 app.ui_scale = settings.ui_scale;
+                if let Some(last_directory) = settings.last_directory {
+                    app.last_directory = Some(last_directory);
+                }
             }
         }
 
         app
+    }
+
+    fn get_default_save_directory() -> Option<PathBuf> {
+        let local_app_data = std::env::var_os("LOCALAPPDATA")?;
+        let mut path = PathBuf::from(local_app_data);
+        path.push("SHf");
+        path.push("Saved");
+        path.push("SaveGames");
+
+        if !path.exists() {
+            return None;
+        }
+
+        let mut subdirectories = Vec::new();
+        if let Ok(entries) = path.read_dir() {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        subdirectories.push(entry.path());
+                    }
+                }
+            }
+        }
+
+        if subdirectories.len() == 1 {
+            Some(subdirectories.remove(0))
+        } else {
+            Some(path)
+        }
     }
 
     fn error_modal(&mut self, ctx: &egui::Context) {
@@ -144,10 +180,18 @@ impl AppState {
     }
 
     fn open_save(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Silent Hill f save", &["sav"])
-            .pick_file()
-        {
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Silent Hill f save", &["sav"]);
+
+        if let Some(path) = &self.last_directory {
+            dialog = dialog.set_directory(path);
+        }
+
+        if let Some(path) = dialog.pick_file() {
+            if let Some(parent) = path.parent() {
+                self.last_directory = Some(parent.to_path_buf());
+            }
+
             if let Err(err) = self.load_save(path) {
                 self.error_message = Some(format!("Failed to load save: {err}"));
             }
@@ -186,9 +230,15 @@ impl AppState {
             if let Some(parent) = path.parent() {
                 dialog = dialog.set_directory(parent);
             }
+        } else if let Some(path) = &self.last_directory {
+            dialog = dialog.set_directory(path);
         }
 
         if let Some(path) = dialog.save_file() {
+            if let Some(parent) = path.parent() {
+                self.last_directory = Some(parent.to_path_buf());
+            }
+
             self.save_to(path);
         }
     }
@@ -1238,6 +1288,7 @@ impl eframe::App for AppState {
         let settings = Settings {
             default_pixels_per_point: self.default_pixels_per_point,
             ui_scale: self.ui_scale,
+            last_directory: self.last_directory.clone(),
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
     }
