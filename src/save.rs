@@ -10,10 +10,9 @@ use bitflags::bitflags;
 
 use crate::uobject::*;
 
-const CUSTOM_STRUCT_CLASSES: [(&str, usize); 27] = [
+const CUSTOM_STRUCT_CLASSES: [(&str, usize); 28] = [
     ("/Script/GameNoce.NocePlayerInventoryComponent", 8),
-    // there are blueprint records inside this object that I don't know how to parse
-    // "/Script/GameNoce.NoceInteractableBase",
+    ("/Script/GameNoce.NoceInteractableBase", 8),
     ("/Script/GameNoce.NocePlayerTriggerBase", 8),
     ("/Script/GameNoce.NocePlayerCharacter", 8),
     ("/Script/GameNoce.NocePlayerState", 8),
@@ -43,6 +42,9 @@ const CUSTOM_STRUCT_CLASSES: [(&str, usize); 27] = [
 ];
 const GAMEPLAY_TAG_CONTAINER_TYPE: &str = "StructProperty</Script/GameplayTags.GameplayTagContainer>";
 const CORE_UOBJECT_TYPE_PREFIX: &str = "StructProperty</Script/CoreUObject.";
+const BLUEPRINT_NAMESPACE: &str = "/Blueprint/";
+// includes null byte
+const GUID_STRING_LENGTH: u32 = 37;
 
 /// A save object containing other objects which can be accessed by name or numeric index
 pub trait Indexable {
@@ -831,11 +833,23 @@ impl TypeTag {
 
 #[binrw::parser(reader, endian)]
 fn read_tags() -> BinResult<Vec<TypeTag>> {
-    let mut tags = Vec::new();
+    let mut tags: Vec<TypeTag> = Vec::new();
     loop {
         let kind = u32::read_options(reader, endian, ())?;
         if kind == 0 {
-            break;
+            if let Some(last) = tags.last() && last.value.as_str().contains(BLUEPRINT_NAMESPACE) {
+                // Blueprint records sometimes have an extra GUID tag at the end but not always. I
+                // don't know how to tell which types will have one and which types won't, so we'll
+                // peek at the next u32 and see if it looks like the length of a GUID string
+                let length = u32::read_options(reader, endian, ()).unwrap_or(0);
+                reader.seek(SeekFrom::Current(-4))?;
+                if length != GUID_STRING_LENGTH {
+                    // if the next value doesn't look like a GUID string, break like we would normally
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         tags.push(TypeTag {
@@ -1135,8 +1149,12 @@ impl Property {
 
     fn is_custom_struct_data(&self) -> bool {
         match (self.name.as_str(), self.body.as_ref().map(|b| &b.value)) {
-            ("Data", Some(PropertyValue::ArrayProperty { values })) => {
-                values.len() == 1 && matches!(values.first(), Some(PropertyValue::UnknownProperty(_)))
+            ("Data", Some(PropertyValue::ArrayProperty { values })) if values.len() == 1 => {
+                if let Some(PropertyValue::UnknownProperty(data)) = values.first() {
+                    !data.is_empty()
+                } else {
+                    false
+                }
             }
             _ => false,
         }
