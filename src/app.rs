@@ -572,6 +572,9 @@ impl AppState {
                             });
 
                             ui.menu_button("Insert below", |ui| {
+                                if property.is_none() {
+                                    ui.disable();
+                                }
                                 if Self::show_type_menu(ui, &mut selected_type) {
                                     action = ListAction::Insert(i + 1);
                                 }
