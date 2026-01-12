@@ -1,6 +1,6 @@
 [package]
 name = "shf-save-editor"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["descawed <github@descawed.com>"]
 edition = "2024"
 description = "A save editor for Silent Hill f"
@@ -17,7 +17,7 @@ binrw = "0.15.0"
 bitflags = "2.10.0"
 eframe = { version = "0.33", features = ["persistence"] }
 egui = { version = "0.33", features = ["persistence"] }
-rfd = "0.16"
+rfd = "0.17"
 serde = "1.0.228"
 
 [build-dependencies]
