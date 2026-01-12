@@ -97,7 +97,7 @@ impl Default for AppState {
 }
 
 impl AppState {
-    pub fn load_app(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn load_app(cc: &eframe::CreationContext<'_>, initial_path: Option<PathBuf>) -> Self {
         let mut app = Self::default();
 
         if let Some(storage) = cc.storage && let Some(settings) = eframe::get_value::<Settings>(storage, SETTINGS_KEY) {
@@ -105,6 +105,16 @@ impl AppState {
             app.ui_scale = settings.ui_scale;
             if let Some(last_directory) = settings.last_directory {
                 app.last_directory = Some(last_directory);
+            }
+        }
+
+        if let Some(path) = initial_path {
+            if let Some(parent) = path.parent() {
+                app.last_directory = Some(parent.to_path_buf());
+            }
+
+            if let Err(err) = app.load_save(path) {
+                app.error_message = Some(format!("Failed to load save: {err}"));
             }
         }
 
