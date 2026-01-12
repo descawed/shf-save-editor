@@ -42,8 +42,8 @@ contains both the number and the ratio, so you can edit using either one.
 The advanced view displays a tree view of the UE5 objects that make up the save file. Functionality is fairly
 basic – you can edit the names and values of most fields and delete struct properties and array elements. Inserting new
 properties/elements is currently limited to scalar types. The editor will also allow you to edit the types of objects,
-but I don't recommend it; it doesn't properly update things behind the scenes. Some types are not properly decoded yet
-and can't be viewed or edited.
+but I don't recommend it; it doesn't properly update things behind the scenes. The one exception is that if you insert a
+new EnumProperty, you should make sure to edit the type tags to fill in the enum type and namespace.
 
 As far as finding something useful to edit, most player-related information is in `PlayerStateRecord` and
 `HinakoRecord`. Beyond that, you're pretty much on your own; I honestly don't know what most of the rest of this data
