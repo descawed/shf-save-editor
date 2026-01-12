@@ -534,6 +534,7 @@ impl AppState {
         };
 
         egui::CollapsingHeader::new(format!("Type: {}", property.property_type.describe()))
+            .id_salt("type")
             .show(ui, |ui| {
                 Self::show_type(ui, &mut property.property_type);
             });
@@ -602,7 +603,11 @@ impl AppState {
                 match action {
                     ListAction::Insert(index) => {
                         let Some(selected_type) = selected_type else { return; };
-                        properties.insert(index, Property::new_scalar(&format!("Field{index}"), PropertyValue::default_for_type(selected_type)));
+                        let field_name = format!("Field{index}");
+                        properties.insert(index, match selected_type {
+                            "EnumProperty" => Property::new_enum(&field_name, "", "", ""),
+                            _ => Property::new_scalar(&field_name, PropertyValue::default_for_type(selected_type)),
+                        });
                     }
                     ListAction::Delete(index) => {
                         properties.remove(index);

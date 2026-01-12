@@ -410,8 +410,8 @@ impl CustomStruct {
 
 /// A list of names of property types considered scalar
 ///
-/// This excludes types with complex initialization or which require other type information.
-pub const SCALAR_TYPE_NAMES: [&str; 8] = [
+/// This excludes types with complex initialization.
+pub const SCALAR_TYPE_NAMES: [&str; 9] = [
     "BoolProperty",
     "ByteProperty",
     "IntProperty",
@@ -420,6 +420,7 @@ pub const SCALAR_TYPE_NAMES: [&str; 8] = [
     "StrProperty",
     "ObjectProperty",
     "NameProperty",
+    "EnumProperty",
 ];
 
 /// The value of a UE5 property
