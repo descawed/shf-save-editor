@@ -153,7 +153,7 @@ impl AppState {
             return;
         };
 
-        let response = egui::Modal::new(egui::Id::new("Error Modal")).show(ctx, |ui| {
+        let response = egui::Modal::new(egui::Id::unique("Error Modal")).show(ctx, |ui| {
             ui.label(RichText::new("Error").strong());
             ui.separator();
             ui.vertical_centered(|ui| {
@@ -1196,7 +1196,9 @@ impl AppState {
 }
 
 impl eframe::App for AppState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         if self.default_pixels_per_point.is_none() {
             self.default_pixels_per_point = Some(ctx.pixels_per_point());
         }
@@ -1212,7 +1214,7 @@ impl eframe::App for AppState {
         }
 
         // Menu bar
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+        egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui
@@ -1255,7 +1257,7 @@ impl eframe::App for AppState {
             });
         });
 
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+        egui::Panel::bottom("status_bar").show(ui, |ui| {
             if ui.add(egui::Slider::new(&mut self.ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE).text("UI Scale")).changed() {
                 ctx.set_pixels_per_point(self.ui_scale * self.default_pixels_per_point.unwrap());
             }
@@ -1263,7 +1265,7 @@ impl eframe::App for AppState {
 
         if self.save.is_some() {
             egui::CentralPanel::default()
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         for tab in AppTab::list() {
                             if ui.selectable_label(self.tab == tab, tab.name()).clicked() {
@@ -1283,7 +1285,7 @@ impl eframe::App for AppState {
                         });
                 });
         } else {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
                     ui.heading("Silent Hill f Save Editor");
@@ -1299,7 +1301,7 @@ impl eframe::App for AppState {
             });
         }
 
-        self.error_modal(ctx);
+        self.error_modal(&ctx);
     }
 
     fn save(&mut self, storage: &mut dyn Storage) {
